@@ -1,0 +1,105 @@
+// {
+//     // Use IntelliSense to learn about possible attributes.
+//     // Hover to view descriptions of existing attributes.
+//     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+//     "version": "0.2.0",
+//     "configurations": [
+//         {
+//             "name": "Python: Current File",
+//             "type": "python",
+//             "request": "launch",
+//             "program": "run.py",
+//             // "program": "${file}",
+//             "console": "integratedTerminal",
+//             "justMyCode": true, 
+//             "env": {"CUDA_VISIBLE_DEVICES":"1"},
+//             "args":[
+//                 "--is_ae_training", "1",
+//                 "--is_gan_training", "0",
+//                 "--is_synthesizig", "0",
+
+//                 "--root_path", "./data/informer/ettm/",
+//                 "--data_path", "ETTm2.csv",
+//                 "--model_id", "ettm2_lr0001_bsz32",
+//                 "--model", "iTransformer",
+//                 "--d_model", "128",
+//                 "--data", "ETTm2",
+//                 "--features", "S",
+//                 "--seq_len", "432",
+//                 "--pred_len", "288",
+//                 "--e_layers", "2",
+//                 "--ae_batch_size", "32",
+//                 "--train_epochs", "100",
+//                 // "--patience", "10",
+//                 "--learning_rate", "0.001",
+
+//                 // "--exp_name", "gan",
+                
+//                 // "--gan_model_id", "gradient_penalty",
+//                 // "--gan_batch_size", "1024",
+//                 // "--gen_lr", "0.0001",
+//                 // "--disc_lr", "0.0001",
+//                 // "--noise_dim", "128",
+//                 // "--d_update", "5",
+//                 // "--gan_iter", "20000",
+
+//                 // "--no_wandb",
+//                 // "--sample_size", "4096", //"32768"
+//             ]
+//         }
+//     ]
+// }
+
+
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "run_iTransGAN.py",
+            // "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true, 
+            "env": {"CUDA_VISIBLE_DEVICES":"1"},
+            "args":[
+                "--is_gan_training", "0",
+                "--is_gan_evaluating", "0",
+                "--is_synthesizig", "1",
+
+                "--root_path", "./data/informer/ettm/",
+                "--data_path", "ETTm2.csv",
+                "--model_id", "ettm2_lr0001_bsz32",
+                "--model", "iTransformer",
+                "--d_model", "128",
+                "--data", "ETTm2",
+                "--features", "S",
+                "--seq_len", "432",
+                "--pred_len", "288",
+                "--e_layers", "2",
+                "--ae_batch_size", "32",
+                "--train_epochs", "100",
+                // "--patience", "10",
+                "--learning_rate", "0.001",
+
+                // "--exp_name", "gan",
+                
+                "--gan_model_id", "dic-hidden-gp",
+                "--gan_batch_size", "1024",
+                "--gen_lr", "0.0001",
+                "--disc_lr", "0.0001",
+                "--noise_dim", "128",
+                "--d_update", "5",
+                "--gan_iter", "20000",
+
+                "--no_wandb",
+                "--sample_size", "4096", //"32768"
+                "--load_iter", "4999",
+            ]
+        }
+    ]
+}

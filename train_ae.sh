@@ -1,0 +1,1 @@
+python run.py --is_ae_training 1 --is_gan_training 0 --is_synthesizig 0 --root_path ./data/informer/ettm/ --data_path ETTm2.csv --model_id ettm2_lr0001_bsz32 --model iTransformer --d_model 128 --data ETTm2 --features S --seq_len 432 --pred_len 288 --e_layers 2 --ae_batch_size 32 --train_epochs 100 --patience 10 --learning_rate 0.001
