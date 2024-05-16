@@ -19,14 +19,21 @@ class Model(nn.Module):
         self.pred_len = configs.pred_len
         self.output_attention = configs.output_attention
         self.use_norm = configs.use_norm
+        self.enc_in = configs.enc_in  # Added
         # Embedding
         self.enc_embedding = DataEmbedding_inverted(
             configs.seq_len,
+            configs.enc_in,
             configs.d_model,
             configs.embed,
             configs.freq,
             configs.dropout,
         )
+        # self.enc_embedding = VariateEmbedding(
+        #     configs.seq_len,
+        #     configs.enc_in,
+        #     configs.d_model,
+        # )
         self.class_strategy = configs.class_strategy
         # Encoder-only architecture
         self.encoder = Encoder(
@@ -58,27 +65,25 @@ class Model(nn.Module):
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
         if self.use_norm:
             # Normalization from Non-stationary Transformer
-            means = x_enc.mean(1, keepdim=True).detach()  # means.shape [batch, 1, 1]
+            means = x_enc.mean(1, keepdim=True).detach()
             x_enc = x_enc - means
             stdev = torch.sqrt(
                 torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5
-            )  # stdev.shape [batch, 1, 1]
+            )
             x_enc /= stdev
 
-        _, _, N = x_enc.shape  # B L N
+        _, _, N = x_enc.shape
         # B: batch_size;    E: d_model;
         # L: seq_len;       S: pred_len;
         # N: number of variate (tokens), can also includes covariates
 
-        # x_enc.shape [32, 96, 1], x_mark_enc.shape [32, 96, 4]
         # Embedding
         # B L N -> B N E                (B L N -> B L E in the vanilla Transformer)
-        # enc_out = self.enc_embedding(x_enc, x_mark_enc) # covariates (e.g timestamp) can be also embedded as tokens # enc_out.shape [32, 5, 512]
-        enc_out = self.enc_embedding(x_enc, None)
+        emb_out = self.enc_embedding(x_enc, None)
 
         # B N E -> B N E                (B L E -> B L E in the vanilla Transformer)
         # the dimensions of embedded time series has been inverted, and then processed by native attn, layernorm and ffn modules
-        enc_out, attns = self.encoder(enc_out, attn_mask=None)
+        enc_out, attns = self.encoder(emb_out, attn_mask=None)
         # enc_out.shape [32, 1, 512] (x_mark_enc=Noneとした場合)
 
         # B N E -> B N S -> B S N
@@ -118,4 +123,4 @@ class Model(nn.Module):
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None):
         dec_out = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
-        return dec_out[:, -self.pred_len :, :]  # [B, L, D]
+        return dec_out[:, -self.pred_len :, :]

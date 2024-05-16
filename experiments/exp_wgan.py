@@ -1,6 +1,5 @@
 """
-潜在表現で識別器を学習する実験クラス
-Gradient Penalty部分の実装を変更
+Gradient Penalty 部分の実装を変更
 """
 
 import os
@@ -33,11 +32,21 @@ class Exp_iTransGAN(Exp_Basic):
     def __init__(self, args):
         super(Exp_iTransGAN, self).__init__(args)
         self.device = self._acquire_device()
-        self.generator = Generator(self.args.noise_dim).to(self.device)
+        self.generator = Generator(
+            self.args.enc_in, self.args.noise_dim, self.device
+        ).to(
+            self.device
+        )  # FIXME
         print(self.generator)
-
-        self.discriminator = Discriminator(self.args.noise_dim).to(self.device)
-        # self.discriminator = Discriminator(self.args.pred_len).to(self.device) # TODO
+        if self.args.use_hidden:
+            self.discriminator = Discriminator(
+                self.args.enc_in, self.args.noise_dim, self.device
+            ).to(self.device)
+        # self.discriminator = Discriminator(self.args.noise_dim).to(self.device)
+        else:
+            self.discriminator = Discriminator(
+                self.args.enc_in, self.args.pred_len, self.device
+            ).to(self.device)
         print(self.discriminator)
 
         self.discriminator_optm = torch.optim.RMSprop(
@@ -86,8 +95,8 @@ class Exp_iTransGAN(Exp_Basic):
 
         self.discriminator.train()
         self.generator.train()
-        self.model.train()
-        print("Traning GAN model with AE.train() mode")
+        self.model.train()  # TODO: ここでtrain()を呼ぶ必要があるか確認
+        # print("Traning GAN model with AE.train() mode")
         # self.model.eval()
         # print("Change AE model to eval mode during GAN training")
 
@@ -112,30 +121,41 @@ class Exp_iTransGAN(Exp_Basic):
                 for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
                     train_loader
                 ):
+                    _, seq_len, N = batch_x.size()
                     self.discriminator_optm.zero_grad()
-                    z = torch.randn(self.args.gan_batch_size, self.args.noise_dim).to(
-                        self.device
-                    )
+                    z = torch.randn(
+                        self.args.gan_batch_size, self.args.enc_in, self.args.noise_dim
+                    ).to(self.device)
 
                     real_rep = self.model.encode(batch_x.float().to(self.device))
-                    # real_dec = self.model.decode(real_rep)
-                    d_real = self.discriminator(torch.squeeze(real_rep))
+                    if self.args.use_hidden:
+                        d_real = self.discriminator(real_rep)
+                    else:
+                        real_dec = self.model.decode(
+                            real_rep
+                        )  # real_dec: (batch_size, seq_len, N)
+                        d_real = self.discriminator(torch.permute(real_dec, (0, 2, 1)))
+                    # d_real = self.discriminator(real_rep)
 
                     # On fake data
                     with torch.no_grad():
                         x_fake = self.generator(z)
 
                     x_fake.requires_grad_()
-                    x_fake = torch.unsqueeze(x_fake, dim=1)
+                    # x_fake = torch.unsqueeze(x_fake, dim=1)
                     # fake_dec = self.model.decode(x_fake)
                     # fake_dec = torch.squeeze(fake_dec)
-                    d_fake = self.discriminator(x_fake)
+                    if self.args.use_hidden:
+                        d_fake = self.discriminator(x_fake)
+                    else:
+                        fake_dec = self.model.decode(x_fake)
+                        d_fake = self.discriminator(torch.permute(fake_dec, (0, 2, 1)))
 
                     # get gradient penalty
-                    # reg = 10 * self.wgan_gp_reg(real_rep, x_fake)
-                    # real_dec = torch.squeeze(real_dec)
-                    # reg = 10 * self.wgan_gp_reg(real_dec, fake_dec)
-                    gradient_penalty = self.grad_penalty(real_rep, x_fake)
+                    if self.args.use_hidden:
+                        gradient_penalty = self.grad_penalty(real_rep, x_fake)
+                    else:
+                        gradient_penalty = self.grad_penalty(real_dec, fake_dec)
 
                     d_loss = d_fake.mean() - d_real.mean() + gradient_penalty
                     d_loss.backward()
@@ -152,22 +172,24 @@ class Exp_iTransGAN(Exp_Basic):
             self.generator.train()
             self.discriminator.train()
             self.generator_optm.zero_grad()
-            z = torch.randn(self.args.gan_batch_size, self.args.noise_dim).to(
-                self.device
-            )
+            z = torch.randn(
+                self.args.gan_batch_size, self.args.enc_in, self.args.noise_dim
+            ).to(self.device)
             fake = self.generator(z)
-            fake = torch.unsqueeze(fake, dim=1)
-            # fake_data = self.model.decode(fake)
-            # fake_data = torch.squeeze(fake_data)
-            g_loss = -self.discriminator(fake).mean()
+
+            if self.args.use_hidden:
+                g_loss = -self.discriminator(fake).mean()
+            else:
+                fake_data = self.model.decode(fake)
+                g_loss = -self.discriminator(torch.permute(fake_data, (0, 2, 1))).mean()
             g_loss.backward()
             self.generator_optm.step()
 
-            if iteration % 1 == 0:
+            if (iteration + 1) % 10 == 0:
                 print(
                     "[Iteration: %d/%d] [Time: %f] [D_loss: %f] [G_loss: %f] [gp: %f]"
                     % (
-                        iteration,
+                        iteration + 1,
                         gan_iter,
                         time.time() - t1,
                         avg_d_loss,
@@ -178,21 +200,47 @@ class Exp_iTransGAN(Exp_Basic):
 
             if not self.args.no_wandb:
                 log_dict = {
-                    "train/d_loss": avg_d_loss,
-                    "train/d_loss_real": d_real.mean(),
-                    "train/d_loss_fake": d_fake.mean(),
-                    "train/g_loss": g_loss.item(),
-                    "train/gradient_penalty": gradient_penalty.item(),
+                    "train/loss/d_loss": avg_d_loss,
+                    "train/loss/d_loss_real": d_real.mean(),
+                    "train/loss/d_loss_fake": d_fake.mean(),
+                    "train/loss/g_loss": g_loss.item(),
+                    "train/loss/gradient_penalty": gradient_penalty.item(),
                 }
                 wandb.log(log_dict)
 
+            if (iteration + 1) % 2000 == 0:
+                dec_out = self.model.decode(fake)
+                gen_data = (
+                    dec_out[:, -self.args.pred_len :, :]
+                    .squeeze()
+                    .detach()
+                    .cpu()
+                    .numpy()
+                )
+
+                for i in range(min(gen_data.shape[2], 10)):
+                    fig = plt.figure(figsize=(20, 20))
+                    for j in range(16):
+                        fig.add_subplot(4, 4, (j + 1))
+                        plt.plot(gen_data[j, :, i], label="generated", linewidth=1)
+                    plt.legend()
+
+                    if not self.args.no_wandb:
+                        print("logging generated data")
+                        wandb.log(
+                            {f"train/generated_per_step/ch{i}": wandb.Image(plt)},
+                            (iteration + 1),
+                        )
+                    plt.clf()
+                    plt.close(fig)
+
             if (iteration + 1) % 5000 == 0:
-                print(f"Save {iteration}iter WGAN model")
+                print(f"Save {iteration+1}iter WGAN model")
                 torch.save(
                     self.generator.state_dict(),
                     os.path.join(
                         save_dir,
-                        f"generator_iter{iteration}.dat",
+                        f"generator_iter{iteration+1}.dat",
                     ),
                 )
 
@@ -231,12 +279,12 @@ class Exp_iTransGAN(Exp_Basic):
             # if self.wandb is not None:
             #     self.wandb.log(log_dict)
 
-        print(f"Save {iteration}iter WGAN model")
+        print(f"Save {iteration + 1}iter WGAN model")
         torch.save(
             self.generator.state_dict(),
             os.path.join(
                 save_dir,
-                f"generator_iter{iteration}.dat",
+                f"generator_iter{iteration + 1}.dat",
             ),
         )
 
@@ -273,9 +321,10 @@ class Exp_iTransGAN(Exp_Basic):
 
         def _gen(batch_size):
             with torch.no_grad():
-                z = torch.randn(batch_size, self.args.noise_dim).to(self.device)
+                z = torch.randn(batch_size, self.args.enc_in, self.args.noise_dim).to(
+                    self.device
+                )
                 x_fake = self.generator(z)
-                x_fake = torch.unsqueeze(x_fake, dim=1)
 
                 dec_out = self.model.decode(x_fake)
                 dynamics = dec_out[:, -self.args.pred_len :, :].squeeze().cpu().numpy()
@@ -332,50 +381,95 @@ class Exp_iTransGAN(Exp_Basic):
 
         np.save(os.path.join(save_dir, "real_reps.npy"), real_reps)
 
-
     def plot_hidden_tsne(self, ae_setting, gan_setting):
         save_dir = os.path.join("./checkpoints/", ae_setting, gan_setting, "eval_gan/")
         ori_data = np.load(os.path.join(save_dir, "real_reps.npy"))
         gen_data = np.load(os.path.join(save_dir, "hiddens.npy"))
 
-        ori_data = np.squeeze(ori_data)
-        ori_data = ori_data[: len(gen_data)]
+        # ori_data = np.squeeze(ori_data)
+        # ori_data = ori_data[: len(gen_data)]
         anal_sample_no = min([1000, len(ori_data)])
         np.random.seed(0)
-        idx = np.random.permutation(len(ori_data))[:anal_sample_no]
-
+        idx = np.random.permutation(min(len(ori_data), len(gen_data)))[:anal_sample_no]
         ori_data = ori_data[idx]
-        recon_data = recon_data[idx]
+        gen_data = gen_data[idx]
+        multi_cat_data = np.concatenate([ori_data, gen_data], axis=0)
 
-        cat_data = np.concatenate([ori_data, gen_data], axis=0)
+        for i in range(min(gen_data.shape[1], 10)):
+            cat_data = multi_cat_data[:, i, :]
+            tsne = TSNE(
+                n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
+            )
+            tsne_obj = tsne.fit_transform(cat_data)
 
-        tsne = TSNE(
-            n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
-        )
-        tsne_obj = tsne.fit_transform(cat_data)
+            f, ax = plt.subplots(1)
+            plt.scatter(
+                tsne_obj[: len(ori_data), 0],
+                tsne_obj[: len(ori_data), 1],
+                alpha=0.2,
+                label="Original",
+            )
+            plt.scatter(
+                tsne_obj[len(ori_data) :, 0],
+                tsne_obj[len(ori_data) :, 1],
+                alpha=0.2,
+                label="Generated",
+            )
 
-        f, ax = plt.subplots(1)
-        plt.scatter(
-            tsne_obj[: len(ori_data), 0],
-            tsne_obj[: len(ori_data), 1],
-            alpha=0.2,
-            label="Original",
-        )
-        plt.scatter(
-            tsne_obj[len(ori_data) :, 0],
-            tsne_obj[len(ori_data) :, 1],
-            alpha=0.2,
-            label="Generated",
-        )
+            ax.legend()
+            plt.title(f"t-SNE plot of ch{i} hidden states")
+            plt.xlabel("x-tsne")
+            plt.ylabel("y-tsne")
+            plt.savefig(
+                os.path.join(save_dir, f"tsne_hidden_ch{i}.png"),
+                bbox_inches="tight",
+                pad_inches=0,
+            )
 
-        ax.legend()
-        plt.title("t-SNE plot of hidden states")
-        plt.xlabel("x-tsne")
-        plt.ylabel("y-tsne")
-        plt.savefig(os.path.join(save_dir, "tsne_hidden.png"))
+            if not self.args.no_wandb:
+                wandb.log({f"eval/t-SNE/hidden/ch{i}": wandb.Image(plt)})
 
-        if not self.args.no_wandb:
-            wandb.log({f"t-SNE/hidden": wandb.Image(plt)})
+    # def plot_hidden_multi_tsne(self, ae_setting, gan_setting):
+    #     data_dir = "/home/user/workspace/checkpoints/exp_multi_lr0001_bsz32_iTransformer_ETTm2_ftM_sl432_ll48_pl288_dm128_nh8_el2_dl1_df2048_fc1_ebtimeF_dtTrue_ettm2_projection_0/exp_gan_multi_hidden_gp_gbsz1024_glr0.0001_dlr0.0001_nd128_du5/eval_gan"
+    #     save_dir = os.path.join("./checkpoints/", ae_setting, "eval_ae/")
+    #     ori_data = np.load(os.path.join(data_dir, "real_reps.npy"))
+    #     # gen_data = np.load(os.path.join(save_dir, "hiddens.npy"))
+
+    #     # ori_data = np.squeeze(ori_data)
+    #     # ori_data = ori_data[: len(gen_data)]
+    #     anal_sample_no = min([1000, len(ori_data)])
+    #     np.random.seed(0)
+    #     idx = np.random.permutation(len(ori_data))[:anal_sample_no]
+    #     ori_data = ori_data[idx]
+    #     # gen_data = gen_data[idx]
+
+    #     cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    #     f, ax = plt.subplots(1)
+
+    #     multi_cat_data = ori_data.reshape([-1, ori_data.shape[2]])
+    #     tsne = TSNE(
+    #             n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
+    #         )
+    #     tsne_obj = tsne.fit_transform(multi_cat_data)
+
+    #     for i in range(min(ori_data.shape[1], 10)):
+    #         plt.scatter(
+    #             tsne_obj[i*1000:(i+1)*1000, 0],
+    #             tsne_obj[i*1000:(i+1)*1000, 1],
+    #             alpha=0.2,
+    #             label=f"ch{i}",
+    #             color=cycle[i],
+    #         )
+
+    #         ax.legend()
+    #     plt.title(f"t-SNE plot of multi hidden states")
+    #     plt.xlabel("x-tsne")
+    #     plt.ylabel("y-tsne")
+    #     plt.savefig(
+    #         os.path.join(save_dir, f"tsne_hidden_multi.png"),
+    #         bbox_inches="tight",
+    #         pad_inches=0,
+    #     )
 
     def save_synth_data(self, ae_setting, gan_setting):
         self.model.load_state_dict(
@@ -396,9 +490,11 @@ class Exp_iTransGAN(Exp_Basic):
 
         def _gen(batch_size):
             with torch.no_grad():
-                z = torch.randn(batch_size, self.args.noise_dim).to(self.device)
+                z = torch.randn(batch_size, self.args.enc_in, self.args.noise_dim).to(
+                    self.device
+                )
                 x_fake = self.generator(z)  # shape(batch_size, 96)
-                x_fake = torch.unsqueeze(x_fake, dim=1)
+                # x_fake = torch.unsqueeze(x_fake, dim=1)
 
                 # for anylysis
                 # x_fake = np.load('/home/user/workspace/not_outlier_oriandgen_hidden_val_jsai.npy')
@@ -423,7 +519,10 @@ class Exp_iTransGAN(Exp_Basic):
             return res, hidden
 
         save_dir = os.path.join(
-            "./checkpoints/", ae_setting, gan_setting, "generated_data"
+            "./checkpoints/",
+            ae_setting,
+            gan_setting,
+            f"generated_data_iter{self.args.load_iter}",
         )
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
@@ -444,63 +543,105 @@ class Exp_iTransGAN(Exp_Basic):
 
     def plot_dec_tsne(self, ae_setting, gan_setting):
         save_dir = os.path.join(
-            "./checkpoints/", ae_setting, gan_setting, f"generated_data_iter{self.args.load_iter}/"
+            "./checkpoints/",
+            ae_setting,
+            gan_setting,
+            f"generated_data_iter{self.args.load_iter}/",
         )
 
-        train_data, train_loader = self._get_data(flag="train")
-        vali_data, vali_loader = self._get_data(flag="val")
+        _, train_loader = self._get_data(flag="train")
+        _, vali_loader = self._get_data(flag="val")
+        train_vali_loader = [train_loader, vali_loader]
+        flag = ["train", "val"]
 
-        ori_data = []
-        # cnt = 1000 // self.args.ae_batch_size + 1
-        for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
-            ori_data.append(batch_y.cpu().numpy())
-        ori_data = np.vstack(ori_data)
-        ori_data = ori_data[:,self.args.label_len:,:]
-        # TODO: ノイズから生成した表現をデコードしたものと同等のものを取り出したい
+        for i, loader in enumerate(train_vali_loader):
+            ori_data = []
+            for j, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(loader):
+                ori_data.append(batch_y.cpu().numpy())
+            ori_data = np.vstack(ori_data)
+            ori_data = ori_data[:, self.args.label_len :, :]
 
-        # ori_data = pickle.load(open("/workspace/data/preprocessed_for_eval/ori_ettm2-288-jsai.pkl", "rb"))
-        # ori_data = ori_data.squeeze()
+            gen_dataset = h5py.File(os.path.join(save_dir, "data.h5"), "r")
+            gen_data = gen_dataset["chunk_00000"]
+            gen_data = np.array(gen_data)
+
+            ori_data = np.squeeze(ori_data)
+            anal_sample_no = min([1000, len(ori_data)])
+            np.random.seed(0)
+            ori_idx = np.random.permutation(len(ori_data))[:anal_sample_no]
+            gen_idx = np.random.permutation(len(gen_data))[:anal_sample_no]
+
+            ori_data = ori_data[ori_idx]
+            gen_data = gen_data[gen_idx]
+
+            assert len(ori_data[0]) == len(gen_data[0])
+
+            multi_cat_data = np.concatenate([ori_data, gen_data], axis=0)
+
+            for i in range(min(gen_data.shape[1], 10)):
+                cat_data = multi_cat_data[:, i, :]
+                tsne = TSNE(
+                    n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
+                )
+                tsne_obj = tsne.fit_transform(cat_data)
+
+                f, ax = plt.subplots(1)
+                plt.scatter(
+                    tsne_obj[: len(ori_data), 0],
+                    tsne_obj[: len(ori_data), 1],
+                    alpha=0.2,
+                    label="Original",
+                )
+                plt.scatter(
+                    tsne_obj[len(ori_data) :, 0],
+                    tsne_obj[len(ori_data) :, 1],
+                    alpha=0.2,
+                    label="Generated",
+                )
+
+                ax.legend()
+                plt.title(f"t-SNE plot of generated {i}ch data")
+                plt.xlabel("x-tsne")
+                plt.ylabel("y-tsne")
+                plt.savefig(
+                    os.path.join(save_dir, f"tsne_dec_ch{i}.png"),
+                    bbox_inches="tight",
+                    pad_inches=0,
+                )
+
+                if not self.args.no_wandb:
+                    wandb.log({f"eval/t-SNE/decoded/ch{i}": wandb.Image(plt)})
+                plt.clf()
+
+    def plot_gen_data(self, ae_setting, gan_setting):
+        save_dir = os.path.join(
+            "./checkpoints/",
+            ae_setting,
+            gan_setting,
+            f"generated_data_iter{self.args.load_iter}",
+        )
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
         gen_dataset = h5py.File(os.path.join(save_dir, "data.h5"), "r")
         gen_data = gen_dataset["chunk_00000"]
-        gen_data = np.array(gen_data)
 
-        ori_data = np.squeeze(ori_data)
-        anal_sample_no = min([1000, len(ori_data)])
-        np.random.seed(0)
-        ori_idx = np.random.permutation(len(ori_data))[:anal_sample_no]
-        gen_idx = np.random.permutation(len(gen_data))[:anal_sample_no]
-
-        ori_data = ori_data[ori_idx]
-        gen_data = gen_data[gen_idx]
-
-        assert len(ori_data[0]) == len(gen_data[0])
-
-        cat_data = np.concatenate([ori_data, gen_data], axis=0)
-
-        tsne = TSNE(n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300)
-        tsne_obj = tsne.fit_transform(cat_data)
-
-        f, ax = plt.subplots(1)
-        plt.scatter(
-            tsne_obj[: len(ori_data), 0],
-            tsne_obj[: len(ori_data), 1],
-            alpha=0.2,
-            label="Original",
-        )
-        plt.scatter(
-            tsne_obj[len(ori_data) :, 0],
-            tsne_obj[len(ori_data) :, 1],
-            alpha=0.2,
-            label="Generated",
-        )
-
-        ax.legend()
-        plt.title("t-SNE plot of decoded data")
-        plt.xlabel("x-tsne")
-        plt.ylabel("y-tsne")
-        plt.savefig(os.path.join(save_dir, "tsne_dec_new.png"))
-        
+        for i in range(min(gen_data.shape[2], 10)):
+            fig = plt.figure(figsize=(16, 9))
+            for j in range(6):
+                fig.add_subplot(2, 3, (j + 1))
+                plt.plot(gen_data[j, :, i], linewidth=1)  # color='#03af7a'
+                plt.xticks(fontsize=10)
+                plt.yticks(fontsize=10)
+            plt.savefig(
+                os.path.join(save_dir, f"list_data_ch{i}.png"),
+                bbox_inches="tight",
+                pad_inches=0,
+            )
+            if not self.args.no_wandb:
+                wandb.log({f"eval/generated/ch{i}": wandb.Image(plt)})
+            plt.clf()
+            plt.close(fig)
 
     def grad_penalty(self, x_real, x_fake):
         batch_size = x_real.size(0)
@@ -513,7 +654,12 @@ class Exp_iTransGAN(Exp_Basic):
         interpolated = Variable(interpolated, requires_grad=True).to(self.device)
 
         # Calculate probability of interpolated examples
-        prob_interpolated = self.discriminator(interpolated)
+        if self.args.use_hidden:
+            prob_interpolated = self.discriminator(interpolated)
+        else:
+            prob_interpolated = self.discriminator(
+                torch.permute(interpolated, (0, 2, 1))
+            )
 
         # Calculate gradients of probabilities with respect to examples
         gradients = torch_grad(
@@ -523,7 +669,7 @@ class Exp_iTransGAN(Exp_Basic):
             create_graph=True,
             retain_graph=True,
         )[0]
-        gradients = gradients.view(batch_size, -1)
+        gradients = gradients.contiguous().view(batch_size, -1)
 
         eps = 1e-10
         gradients_norm = torch.sqrt(
@@ -533,22 +679,6 @@ class Exp_iTransGAN(Exp_Basic):
         gradient_penalty = gp_weight * ((gradients_norm - 1) ** 2).mean()
         # print("gradient_penalty: ", gradient_penalty.item())
         return gradient_penalty
-
-    # def grad_penalty(self, x_real, x_fake, center=1.0):
-    #     batch_size = x_real.size(0)
-    #     # print(f'x_real:{x_real.shape}, x_fake:{x_fake.shape}')
-    #     eps = torch.rand(batch_size, device=self.device).view(batch_size, -1)
-    #     x_interp = (
-    #         1 - eps
-    #     ) * x_real + eps * x_fake  # interpolation between real and fake data
-    #     x_interp = x_interp.detach()
-    #     x_interp.requires_grad_()
-    #     d_out = self.discriminator(x_interp)
-
-    #     # reg: 勾配の2乗の平方根から中心を引いて2乗したものの平均（勾配が中心に対してどれだけ離れているかを表すペナルティ）
-    #     reg = (compute_grad2(d_out, x_interp).sqrt() - center).pow(2).mean()
-    #     print("gradient_penalty (reg): ", reg.item())
-    #     return reg
 
 
 # Utility functions

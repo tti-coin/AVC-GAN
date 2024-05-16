@@ -1,4 +1,5 @@
 import os
+import pdb
 import time
 import warnings
 
@@ -424,7 +425,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
     def recon_from_train_vali(self, setting, load=False):
         """
-        generate trues and recons for evaluation # TODO
+        generate trues and recons for evaluation
         """
         train_data, train_loader = self._get_data(flag="train")
         vali_data, vali_loader = self._get_data(flag="val")
@@ -483,9 +484,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                             outputs = self.model.decode(enc_out)
                     outputs = outputs.detach().cpu().numpy()
                     batch_y = batch_y.detach().cpu().numpy()
-                    if (
-                        train_data.scale or vali_data.scale
-                    ) and self.args.inverse:
+                    if (train_data.scale or vali_data.scale) and self.args.inverse:
                         shape = outputs.shape
 
                         outputs = (
@@ -535,61 +534,67 @@ class Exp_Long_Term_Forecast(Exp_Basic):
             np.random.seed(0)
             ori_idx = np.random.permutation(len(ori_data))[:anal_sample_no]
             recon_idx = np.random.permutation(len(recon_data))[:anal_sample_no]
-            
+
             ori_data = ori_data[ori_idx]
-            recon_data = recon_data[recon_idx]
+            recon_data = recon_data[ori_idx]
 
-            cat_data = np.concatenate(
-                [ori_data[:, label_len:, -1], recon_data[:, :, -1]], axis=0
-            )
+            for i in range(min(recon_data.shape[2], 10)):
+                cat_data = np.concatenate(
+                    [ori_data[:, label_len:, i], recon_data[:, :, i]], axis=0
+                )
 
-            print(f"Plotting t-SNE of reconstructed {flag} data")
-            tsne = TSNE(
-                n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
-            )
-            tsne_obj = tsne.fit_transform(cat_data)
+                print(f"Plotting t-SNE of reconstructed {flag} data")
+                tsne = TSNE(
+                    n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
+                )
+                tsne_obj = tsne.fit_transform(cat_data)
 
-            f, ax = plt.subplots(1)
-            plt.scatter(
-                tsne_obj[: len(ori_data), 0],
-                tsne_obj[: len(ori_data), 1],
-                alpha=0.2,
-                label="Original",
-            )
-            plt.scatter(
-                tsne_obj[len(ori_data) :, 0],
-                tsne_obj[len(ori_data) :, 1],
-                alpha=0.2,
-                label="Reconstructed",
-            )
+                f, ax = plt.subplots(1)
+                plt.scatter(
+                    tsne_obj[: len(ori_data), 0],
+                    tsne_obj[: len(ori_data), 1],
+                    alpha=0.2,
+                    label="Original",
+                )
+                plt.scatter(
+                    tsne_obj[len(ori_data) :, 0],
+                    tsne_obj[len(ori_data) :, 1],
+                    alpha=0.2,
+                    label="Reconstructed",
+                )
 
-            ax.legend()
-            plt.title(f"t-SNE plot of reconstructed {flag} data")
-            plt.xlabel("x-tsne")
-            plt.ylabel("y-tsne")
-            plt.savefig(os.path.join(save_dir, f"tsne_recon_{flag}.png"))
+                ax.legend()
+                plt.title(f"t-SNE plot of reconstructed {flag} data")
+                plt.xlabel("x-tsne")
+                plt.ylabel("y-tsne")
+                plt.savefig(
+                    os.path.join(save_dir, f"tsne_recon_{flag}_ch{i}.png"),
+                    bbox_inches="tight",
+                    pad_inches=0,
+                )
 
-            if not self.args.no_wandb:
-                wandb.log({f"t-SNE/{flag}": wandb.Image(plt)})
+                if not self.args.no_wandb:
+                    wandb.log({f"eval/t-SNE/reconstructed/ch{i}/{flag}": wandb.Image(plt)})
 
-            print(f"Plotting reconstructed {flag} data with matplotlib")
-            outputs_dir = os.path.join("checkpoints", setting, "eval_ae/outputs")
-            if recon_data.shape[2] != 1:
-                for i in range(recon_data.shape[2]):
-                    for j in range(10):
-                        fig = plt.figure()
-                        plt.plot(recon_data[j,:,i], label="recons", linewidth=2)
-                        plt.plot(ori_data[j,label_len:,i], label="trues", linewidth=2)
-                        plt.legend()
-                        plt.savefig(os.path.join(outputs_dir, f"ch{i}_no{j}.png"))
-                        plt.clf()
-                        plt.close(fig)
-            else:
-                for i in range(10):
-                    fig = plt.figure()
-                    plt.plot(recon_data[i], label="recons", linewidth=2)
-                    plt.plot(ori_data[i][label_len:], label="trues", linewidth=2)
+                print(f"Plotting reconstructed {flag} data with matplotlib")
+                outputs_dir = os.path.join("checkpoints", setting, "eval_ae/outputs")
+                if not os.path.exists(outputs_dir):
+                    os.makedirs(outputs_dir)
+                    
+                for i in range(min(recon_data.shape[2], 10)):
+                    fig = plt.figure(figsize=(20, 20))
+                    for j in range(16):
+                        fig.add_subplot(4, 4, (j + 1))
+                        plt.plot(recon_data[j, :, i], label="recons", linewidth=1)
+                        plt.plot(ori_data[j, label_len:, i], label="trues", linewidth=1)
                     plt.legend()
-                    plt.savefig(os.path.join(outputs_dir, f"no{i}.png"))
+                    plt.title(f"reconstructed {flag} data")
+                    plt.savefig(
+                        os.path.join(outputs_dir, f"list_data_{flag}_ch{i}.png"),
+                        bbox_inches="tight",
+                        pad_inches=0,
+                    )
+                    if not self.args.no_wandb:
+                        wandb.log({f"eval/reconstruted/ch{i}": wandb.Image(plt)})
                     plt.clf()
                     plt.close(fig)
