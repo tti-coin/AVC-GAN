@@ -95,10 +95,7 @@ class Exp_iTransGAN(Exp_Basic):
 
         self.discriminator.train()
         self.generator.train()
-        self.model.train()  # TODO: ここでtrain()を呼ぶ必要があるか確認
-        # print("Traning GAN model with AE.train() mode")
-        # self.model.eval()
-        # print("Change AE model to eval mode during GAN training")
+        self.model.train()  # TODO
 
         save_dir = os.path.join("/workspace/checkpoints/", ae_setting, gan_setting)
         if not os.path.exists(save_dir):
@@ -288,9 +285,9 @@ class Exp_iTransGAN(Exp_Basic):
             ),
         )
 
-    def generate_hiddens_real_reps(self, ae_setting, gan_setting):
+    def save_hiddens_and_generated_as_npy(self, ae_setting, gan_setting):
         """
-        Save hidden states and real representations
+        Save hidden states
 
         Parameters:
         ----------
@@ -299,87 +296,82 @@ class Exp_iTransGAN(Exp_Basic):
 
         Returns:
         ----------
-        None
-            Save hidden states and real representations in the specified directory
+        None : None
         """
         self.model.load_state_dict(
             torch.load(os.path.join("./checkpoints/", ae_setting, "checkpoint.pth"))
         )
+        # self.generator.load_state_dict(
+        #     torch.load(
+        #         os.path.join(
+        #             "./checkpoints/",
+        #             ae_setting,
+        #             gan_setting,
+        #             f"generator_iter{self.args.load_iter}.dat",
+        #         )
+        #     )
+        # )
         self.generator.load_state_dict(
             torch.load(
-                os.path.join(
-                    "./checkpoints/",
-                    ae_setting,
-                    gan_setting,
-                    f"generator_iter{self.args.load_iter}.dat",
-                )
+                "/home/user/workspace/checkpoints/variemb_multi_lr0001_bsz32_iTransformer_ETTm2_ftM_sl432_ll48_pl288_dm128_nh8_el2_dl1_df2048_fc1_ebtimeF_dtTrue_ettm2_projection_0/debug_cgan_multi_hidden_gp_gbsz1024_glr0.0001_dlr0.0001_nd128_du1_hdTrue/generator_iter3.dat"
             )
         )
+        print("DEBUG MODE")
+
         print(f"Loading trained {self.args.load_iter} WGAN model")
         self.model.eval()
         self.generator.eval()
 
-        def _gen(batch_size):
-            with torch.no_grad():
-                z = torch.randn(batch_size, self.args.enc_in, self.args.noise_dim).to(
-                    self.device
-                )
-                x_fake = self.generator(z)
-
-                dec_out = self.model.decode(x_fake)
-                dynamics = dec_out[:, -self.args.pred_len :, :].squeeze().cpu().numpy()
-
-            hidden = []
-            res = []
-
-            for i in range(batch_size):
-                dyn = dynamics[i].tolist()
-                res.append(dyn)
-                hidden.append(torch.squeeze(x_fake[i]).tolist())
-
-            return res, hidden
+        # generate hidden states and save them
+        with torch.no_grad():
+            z = torch.randn(
+                self.args.gan_batch_size, self.args.enc_in, self.args.noise_dim
+            ).to(self.device)
+            x_fake = self.generator(z)
+            hiddens = x_fake.detach().cpu().numpy()
+            dec_fake = self.model.decode(x_fake)
+            generated = dec_fake[:, -self.args.pred_len :, :].squeeze().cpu().numpy()
 
         save_dir = os.path.join("./checkpoints/", ae_setting, gan_setting, "eval_gan/")
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
+        np.save(
+            os.path.join(save_dir, "hiddens.npy"), hiddens
+        )  ### FIXME: shape (batch, noise_dim, enc_in)
 
-        res, hidden = _gen(self.args.gan_batch_size)
-        # pdb.set_trace()
-        np.save(os.path.join(save_dir, "hiddens.npy"), hidden)
+        save_data_dir = os.path.join(
+            "./checkpoints/",
+            ae_setting,
+            gan_setting,
+            f"generated_data_iter{self.args.load_iter}",
+        )
+        if not os.path.exists(save_data_dir):
+            os.makedirs(save_data_dir)
+        np.save(
+            os.path.join(save_data_dir, "sample_data.npy"), generated
+        )  # shape (batch, pred_len, N)
 
-        # evaluate real representation
-        # val_data, val_loader = self._get_data(flag="val")
+    def save_real_reps_as_npy(self, ae_setting, gan_setting):
 
-        train_data, val_loader = self._get_data(flag="train")
+        save_dir = os.path.join("./checkpoints/", ae_setting, gan_setting, "eval_gan/")
+        _, train_loader = self._get_data(flag="train")
 
-        recons = []
-        trues = []
         real_reps = []
         with torch.no_grad():
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
-                val_loader
+                train_loader
             ):
-                # enc_out, attns = self.encode(enc_out, attn_mask=None)
+
                 enc_out = self.model.encode(batch_x.float().to(self.device))
-
                 real_rep = enc_out.detach().cpu().numpy()
-
-                dec_out = self.model.decode(enc_out)
-                recon = dec_out.detach().cpu().numpy()
-                true = batch_y.detach().cpu().numpy()
-
-                recons.append(recon)
-                trues.append(true)
                 real_reps.append(real_rep)
 
-        recons = np.array(recons)
-        trues = np.array(trues)
         real_reps = np.array(real_reps)
-        recons = recons.reshape(-1, recons.shape[-2], recons.shape[-1])
-        trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
         real_reps = real_reps.reshape(-1, real_reps.shape[-2], real_reps.shape[-1])
 
-        np.save(os.path.join(save_dir, "real_reps.npy"), real_reps)
+        np.save(
+            os.path.join(save_dir, "real_reps.npy"), real_reps
+        )  # shape (batch*len(train_loader), enc_in, noise_dim)
 
     def plot_hidden_tsne(self, ae_setting, gan_setting):
         save_dir = os.path.join("./checkpoints/", ae_setting, gan_setting, "eval_gan/")
@@ -407,7 +399,7 @@ class Exp_iTransGAN(Exp_Basic):
                 tsne_obj[: len(ori_data), 0],
                 tsne_obj[: len(ori_data), 1],
                 alpha=0.2,
-                label="Original",
+                label="Original(train)", # FIXME: vali にも対応させる？
             )
             plt.scatter(
                 tsne_obj[len(ori_data) :, 0],
@@ -472,6 +464,10 @@ class Exp_iTransGAN(Exp_Basic):
     #     )
 
     def save_synth_data(self, ae_setting, gan_setting):
+        """
+        Synthesize large scale data
+        """
+
         self.model.load_state_dict(
             torch.load(os.path.join("./checkpoints/", ae_setting, "checkpoint.pth"))
         )
@@ -552,21 +548,22 @@ class Exp_iTransGAN(Exp_Basic):
         _, train_loader = self._get_data(flag="train")
         _, vali_loader = self._get_data(flag="val")
         train_vali_loader = [train_loader, vali_loader]
-        flag = ["train", "val"]
+        flags = ["train", "val"]
 
         for i, loader in enumerate(train_vali_loader):
-            ori_data = []
+            ori_data = [] # FIXME: 予め保存しておいたデータをloadする
             for j, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(loader):
                 ori_data.append(batch_y.cpu().numpy())
             ori_data = np.vstack(ori_data)
             ori_data = ori_data[:, self.args.label_len :, :]
 
-            gen_dataset = h5py.File(os.path.join(save_dir, "data.h5"), "r")
-            gen_data = gen_dataset["chunk_00000"]
-            gen_data = np.array(gen_data)
+            # gen_dataset = h5py.File(os.path.join(save_dir, "data.h5"), "r")
+            # gen_data = gen_dataset["chunk_00000"]
+            # gen_data = np.array(gen_data)
+            gen_data = np.load(os.path.join(save_dir, "sample_data.npy"))
 
-            ori_data = np.squeeze(ori_data)
-            anal_sample_no = min([1000, len(ori_data)])
+            anal_sample_no = min([1000, len(ori_data), len(gen_data)])
+            print(f"anal_sample_no: {anal_sample_no}")
             np.random.seed(0)
             ori_idx = np.random.permutation(len(ori_data))[:anal_sample_no]
             gen_idx = np.random.permutation(len(gen_data))[:anal_sample_no]
@@ -578,8 +575,8 @@ class Exp_iTransGAN(Exp_Basic):
 
             multi_cat_data = np.concatenate([ori_data, gen_data], axis=0)
 
-            for i in range(min(gen_data.shape[1], 10)):
-                cat_data = multi_cat_data[:, i, :]
+            for k in range(min(gen_data.shape[1], 10)):
+                cat_data = multi_cat_data[:, k, :]
                 tsne = TSNE(
                     n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
                 )
@@ -590,7 +587,7 @@ class Exp_iTransGAN(Exp_Basic):
                     tsne_obj[: len(ori_data), 0],
                     tsne_obj[: len(ori_data), 1],
                     alpha=0.2,
-                    label="Original",
+                    label=f"Original({flags[i]})",
                 )
                 plt.scatter(
                     tsne_obj[len(ori_data) :, 0],
@@ -600,17 +597,17 @@ class Exp_iTransGAN(Exp_Basic):
                 )
 
                 ax.legend()
-                plt.title(f"t-SNE plot of generated {i}ch data")
+                plt.title(f"t-SNE plot of generated {k}ch data")
                 plt.xlabel("x-tsne")
                 plt.ylabel("y-tsne")
                 plt.savefig(
-                    os.path.join(save_dir, f"tsne_dec_ch{i}.png"),
+                    os.path.join(save_dir, f"tsne_dec_{flags[i]}_ch{k}.png"),
                     bbox_inches="tight",
                     pad_inches=0,
                 )
 
                 if not self.args.no_wandb:
-                    wandb.log({f"eval/t-SNE/decoded/ch{i}": wandb.Image(plt)})
+                    wandb.log({f"eval/t-SNE/decoded/ch{k}/{flags[i]}": wandb.Image(plt)})
                 plt.clf()
 
     def plot_gen_data(self, ae_setting, gan_setting):
@@ -623,8 +620,9 @@ class Exp_iTransGAN(Exp_Basic):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
-        gen_dataset = h5py.File(os.path.join(save_dir, "data.h5"), "r")
-        gen_data = gen_dataset["chunk_00000"]
+        # gen_dataset = h5py.File(os.path.join(save_dir, "data.h5"), "r")
+        # gen_data = gen_dataset["chunk_00000"]
+        gen_data = np.load(os.path.join(save_dir, "sample_data.npy"))
 
         for i in range(min(gen_data.shape[2], 10)):
             fig = plt.figure(figsize=(16, 9))

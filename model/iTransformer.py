@@ -29,11 +29,6 @@ class Model(nn.Module):
             configs.freq,
             configs.dropout,
         )
-        # self.enc_embedding = VariateEmbedding(
-        #     configs.seq_len,
-        #     configs.enc_in,
-        #     configs.d_model,
-        # )
         self.class_strategy = configs.class_strategy
         # Encoder-only architecture
         self.encoder = Encoder(

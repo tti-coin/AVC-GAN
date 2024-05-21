@@ -123,6 +123,25 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
 
+        prepro_dir = (
+            f"./data/preprocessd_datasets/{self.args.des}/pl{self.args.pred_len}"
+        )
+        if not os.path.exists(os.path.join(prepro_dir)):
+            os.makedirs(prepro_dir)
+
+            prepro_data = []
+            for j, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
+                train_loader
+            ):
+                prepro_data.append(batch_y.cpu().numpy())
+            prepro_data = np.vstack(prepro_data)
+            prepro_data = prepro_data[
+                :, self.args.label_len :, :
+            ]  # shape: (batch*len(train_loader), pred_len, N)
+            np.save(
+                os.path.join(prepro_dir, "prepro_train.npy"), prepro_data
+            )  # FIXME: vali, test にも拡張する？
+
         for epoch in range(self.args.train_epochs):
             iter_count = 0
             train_loss = []
@@ -554,7 +573,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     tsne_obj[: len(ori_data), 0],
                     tsne_obj[: len(ori_data), 1],
                     alpha=0.2,
-                    label="Original",
+                    label=f"Original({flag})",
                 )
                 plt.scatter(
                     tsne_obj[len(ori_data) :, 0],
@@ -564,7 +583,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 )
 
                 ax.legend()
-                plt.title(f"t-SNE plot of reconstructed {flag} data")
+                plt.title(f"t-SNE plot of reconstructed ch{i} data")
                 plt.xlabel("x-tsne")
                 plt.ylabel("y-tsne")
                 plt.savefig(
@@ -574,19 +593,21 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 )
 
                 if not self.args.no_wandb:
-                    wandb.log({f"eval/t-SNE/reconstructed/ch{i}/{flag}": wandb.Image(plt)})
+                    wandb.log(
+                        {f"eval/t-SNE/reconstructed/ch{i}/{flag}": wandb.Image(plt)}
+                    )
 
                 print(f"Plotting reconstructed {flag} data with matplotlib")
                 outputs_dir = os.path.join("checkpoints", setting, "eval_ae/outputs")
                 if not os.path.exists(outputs_dir):
                     os.makedirs(outputs_dir)
-                    
+
                 for i in range(min(recon_data.shape[2], 10)):
                     fig = plt.figure(figsize=(20, 20))
-                    for j in range(16):
-                        fig.add_subplot(4, 4, (j + 1))
-                        plt.plot(recon_data[j, :, i], label="recons", linewidth=1)
+                    for j in range(9):
+                        fig.add_subplot(3, 3, (j + 1))
                         plt.plot(ori_data[j, label_len:, i], label="trues", linewidth=1)
+                        plt.plot(recon_data[j, :, i], label="recons", linewidth=1)
                     plt.legend()
                     plt.title(f"reconstructed {flag} data")
                     plt.savefig(
