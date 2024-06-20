@@ -19,9 +19,9 @@ from utils.tools import EarlyStopping, adjust_learning_rate, visual
 warnings.filterwarnings("ignore")
 
 
-class Exp_Long_Term_Forecast(Exp_Basic):
+class Exp_AutoEncoder(Exp_Basic):
     def __init__(self, args):
-        super(Exp_Long_Term_Forecast, self).__init__(args)
+        super(Exp_AutoEncoder, self).__init__(args)
 
     def _build_model(self):
         model = self.model_dict[self.args.model].Model(self.args).float()
@@ -60,12 +60,17 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     batch_y_mark = batch_y_mark.float().to(self.device)
 
                 # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len :, :]).float()
+                # CHANGED
                 dec_inp = (
-                    torch.cat([batch_y[:, : self.args.label_len, :], dec_inp], dim=1)
+                    torch.zeros(
+                        self.args.ae_batch_size,
+                        self.args.seq_len + self.args.label_len,
+                        self.args.enc_in,
+                    )
                     .float()
                     .to(self.device)
                 )
+
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
@@ -88,17 +93,13 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         )
                 f_dim = -1 if self.args.features == "MS" else 0
                 outputs = outputs[:, -self.args.pred_len :, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len :, f_dim:].to(self.device)
 
                 pred = outputs.detach().cpu()
-                true = batch_y.detach().cpu()
+                true = batch_x.detach().cpu()
 
                 loss = criterion(pred, true)
                 total_loss.append(loss)
 
-                # for soft dtw loss
-                # loss = loss.mean()
-                # total_loss.append(loss)
         total_loss = np.average(total_loss)
         self.model.train()
         return total_loss
@@ -124,7 +125,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
             scaler = torch.cuda.amp.GradScaler()
 
         prepro_dir = (
-            f"./data/preprocessd_datasets/{self.args.des}/pl{self.args.pred_len}"
+            f"./data/preprocessed_datasets/{self.args.des}/sl{self.args.seq_len}"
         )
         if not os.path.exists(os.path.join(prepro_dir)):
             os.makedirs(prepro_dir)
@@ -133,14 +134,11 @@ class Exp_Long_Term_Forecast(Exp_Basic):
             for j, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
                 train_loader
             ):
-                prepro_data.append(batch_y.cpu().numpy())
+                prepro_data.append(batch_x.cpu().numpy())
             prepro_data = np.vstack(prepro_data)
-            prepro_data = prepro_data[
-                :, self.args.label_len :, :
-            ]  # shape: (batch*len(train_loader), pred_len, N)
             np.save(
-                os.path.join(prepro_dir, "prepro_train.npy"), prepro_data
-            )  # FIXME: vali, test にも拡張する？
+                os.path.join(prepro_dir, "prepro_train_shuffled.npy"), prepro_data
+            )  # TODO: vali, test にも拡張する？
 
         for epoch in range(self.args.train_epochs):
             iter_count = 0
@@ -164,9 +162,13 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     batch_y_mark = batch_y_mark.float().to(self.device)
 
                 # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len :, :]).float()
+                # CHANGED
                 dec_inp = (
-                    torch.cat([batch_y[:, : self.args.label_len, :], dec_inp], dim=1)
+                    torch.zeros(
+                        self.args.ae_batch_size,
+                        (self.args.seq_len + self.args.label_len),
+                        self.args.enc_in,
+                    )
                     .float()
                     .to(self.device)
                 )
@@ -185,10 +187,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
                         f_dim = -1 if self.args.features == "MS" else 0
                         outputs = outputs[:, -self.args.pred_len :, f_dim:]
-                        batch_y = batch_y[:, -self.args.pred_len :, f_dim:].to(
-                            self.device
-                        )
-                        loss = criterion(outputs, batch_y)
+                        loss = criterion(outputs, batch_x)  # CHANGED
                         train_loss.append(loss.item())
                 else:
                     if self.args.output_attention:
@@ -202,13 +201,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
                     f_dim = -1 if self.args.features == "MS" else 0
                     outputs = outputs[:, -self.args.pred_len :, f_dim:]
-                    batch_y = batch_y[:, -self.args.pred_len :, f_dim:].to(self.device)
-                    loss = criterion(outputs, batch_y)
+                    loss = criterion(outputs, batch_x)  # CHANGED
                     train_loss.append(loss.item())
-
-                    # for soft dtw loss
-                    # loss = loss.mean()
-                    # train_loss.append(loss.item())
 
                 if (i + 1) % 100 == 0:
                     print(
@@ -290,12 +284,16 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     batch_y_mark = batch_y_mark.float().to(self.device)
 
                 # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len :, :]).float()
                 dec_inp = (
-                    torch.cat([batch_y[:, : self.args.label_len, :], dec_inp], dim=1)
+                    torch.zeros(
+                        self.args.ae_batch_size,
+                        self.args.seq_len + self.args.label_len,
+                        self.args.enc_in,
+                    )
                     .float()
                     .to(self.device)
                 )
+
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
@@ -320,25 +318,25 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
                 f_dim = -1 if self.args.features == "MS" else 0
                 outputs = outputs[:, -self.args.pred_len :, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len :, f_dim:].to(self.device)
                 outputs = outputs.detach().cpu().numpy()
-                batch_y = batch_y.detach().cpu().numpy()
+                batch_x = batch_x.detach().cpu().numpy()
                 if test_data.scale and self.args.inverse:
                     shape = outputs.shape
                     outputs = test_data.inverse_transform(outputs.squeeze(0)).reshape(
                         shape
                     )
-                    batch_y = test_data.inverse_transform(batch_y.squeeze(0)).reshape(
+                    batch_x = test_data.inverse_transform(batch_x.squeeze(0)).reshape(
                         shape
                     )
 
                 pred = outputs
-                true = batch_y
+                true = batch_x
 
                 preds.append(pred)
                 trues.append(true)
                 if i % 20 == 0:
-                    input = batch_x.detach().cpu().numpy()
+                    input = batch_x
+                    # input = batch_x.detach().cpu().numpy()
                     if test_data.scale and self.args.inverse:
                         shape = input.shape
                         input = test_data.inverse_transform(input.squeeze(0)).reshape(
@@ -375,74 +373,74 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
         return
 
-    def predict(self, setting, load=False):
-        pred_data, pred_loader = self._get_data(flag="pred")
+    # def predict(self, setting, load=False):
+    #     pred_data, pred_loader = self._get_data(flag="pred")
 
-        if load:
-            path = os.path.join(self.args.checkpoints, setting)
-            best_model_path = path + "/" + "checkpoint.pth"
-            self.model.load_state_dict(torch.load(best_model_path))
+    #     if load:
+    #         path = os.path.join(self.args.checkpoints, setting)
+    #         best_model_path = path + "/" + "checkpoint.pth"
+    #         self.model.load_state_dict(torch.load(best_model_path))
 
-        preds = []
+    #     preds = []
 
-        self.model.eval()
-        with torch.no_grad():
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
-                pred_loader
-            ):
-                batch_x = batch_x.float().to(self.device)
-                batch_y = batch_y.float()
-                batch_x_mark = batch_x_mark.float().to(self.device)
-                batch_y_mark = batch_y_mark.float().to(self.device)
+    #     self.model.eval()
+    #     with torch.no_grad():
+    #         for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
+    #             pred_loader
+    #         ):
+    #             batch_x = batch_x.float().to(self.device)
+    #             batch_y = batch_y.float()
+    #             batch_x_mark = batch_x_mark.float().to(self.device)
+    #             batch_y_mark = batch_y_mark.float().to(self.device)
 
-                # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len :, :]).float()
-                dec_inp = (
-                    torch.cat([batch_y[:, : self.args.label_len, :], dec_inp], dim=1)
-                    .float()
-                    .to(self.device)
-                )
-                # encoder - decoder
-                if self.args.use_amp:
-                    with torch.cuda.amp.autocast():
-                        if self.args.output_attention:
-                            outputs = self.model(
-                                batch_x, batch_x_mark, dec_inp, batch_y_mark
-                            )[0]
-                        else:
-                            outputs = self.model(
-                                batch_x, batch_x_mark, dec_inp, batch_y_mark
-                            )
-                else:
-                    if self.args.output_attention:
-                        outputs = self.model(
-                            batch_x, batch_x_mark, dec_inp, batch_y_mark
-                        )[0]
-                    else:
-                        outputs = self.model(
-                            batch_x, batch_x_mark, dec_inp, batch_y_mark
-                        )
-                outputs = outputs.detach().cpu().numpy()
-                if pred_data.scale and self.args.inverse:
-                    shape = outputs.shape
-                    outputs = pred_data.inverse_transform(outputs.squeeze(0)).reshape(
-                        shape
-                    )
-                preds.append(outputs)
+    #             # decoder input
+    #             dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len :, :]).float()
+    #             dec_inp = (
+    #                 torch.cat([batch_y[:, : self.args.label_len, :], dec_inp], dim=1)
+    #                 .float()
+    #                 .to(self.device)
+    #             )
+    #             # encoder - decoder
+    #             if self.args.use_amp:
+    #                 with torch.cuda.amp.autocast():
+    #                     if self.args.output_attention:
+    #                         outputs = self.model(
+    #                             batch_x, batch_x_mark, dec_inp, batch_y_mark
+    #                         )[0]
+    #                     else:
+    #                         outputs = self.model(
+    #                             batch_x, batch_x_mark, dec_inp, batch_y_mark
+    #                         )
+    #             else:
+    #                 if self.args.output_attention:
+    #                     outputs = self.model(
+    #                         batch_x, batch_x_mark, dec_inp, batch_y_mark
+    #                     )[0]
+    #                 else:
+    #                     outputs = self.model(
+    #                         batch_x, batch_x_mark, dec_inp, batch_y_mark
+    #                     )
+    #             outputs = outputs.detach().cpu().numpy()
+    #             if pred_data.scale and self.args.inverse:
+    #                 shape = outputs.shape
+    #                 outputs = pred_data.inverse_transform(outputs.squeeze(0)).reshape(
+    #                     shape
+    #                 )
+    #             preds.append(outputs)
 
-        preds = np.array(preds)
-        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
+    #     preds = np.array(preds)
+    #     preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
 
-        # result save
-        folder_path = "./results/" + setting + "/"
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)
+    #     # result save
+    #     folder_path = "./results/" + setting + "/"
+    #     if not os.path.exists(folder_path):
+    #         os.makedirs(folder_path)
 
-        np.save(folder_path + "real_prediction.npy", preds)
+    #     np.save(folder_path + "real_prediction.npy", preds)
 
-        return
+    #     return
 
-    def recon_from_train_vali(self, setting, load=False):
+    def save_recon_as_npy(self, setting, load=False):
         """
         generate trues and recons for evaluation
         """
@@ -460,6 +458,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         self.model.eval()
         with torch.no_grad():
             for flag, loader in enumerate(train_vali_loader):
+                real_hiddens = []
                 recons = []
                 trues = []
                 for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
@@ -471,38 +470,40 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     batch_y_mark = batch_y_mark.float().to(self.device)
 
                     # decoder input
-                    dec_inp = torch.zeros_like(
-                        batch_y[:, -self.args.pred_len :, :]
-                    ).float()
                     dec_inp = (
-                        torch.cat(
-                            [batch_y[:, : self.args.label_len, :], dec_inp], dim=1
+                        torch.zeros(
+                            self.args.ae_batch_size,
+                            (self.args.seq_len + self.args.label_len),
+                            self.args.enc_in,
                         )
                         .float()
                         .to(self.device)
                     )
                     # encoder - decoder
-                    if self.args.use_amp:  # default: False
+                    if self.args.use_amp:
                         with torch.cuda.amp.autocast():
                             if self.args.output_attention:
-                                outputs = self.model(
-                                    batch_x, batch_x_mark, dec_inp, batch_y_mark
-                                )[0]
+                                enc_out = self.model.encode(batch_x)
+                                outputs = self.model.decode(enc_out)[0]
+                                # outputs = self.model(
+                                #     batch_x, batch_x_mark, dec_inp, batch_y_mark
+                                # )[0]
                             else:
-                                outputs = self.model(
-                                    batch_x, batch_x_mark, dec_inp, batch_y_mark
-                                )
+                                enc_out = self.model.encode(batch_x)
+                                outputs = self.model.decode(enc_out)
                     else:
-                        if self.args.output_attention:  # default: False
-                            outputs = self.model(
-                                batch_x, batch_x_mark, dec_inp, batch_y_mark
-                            )[0]
-                        else:
-                            # outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        if self.args.output_attention:
+                            enc_out = self.model.encode(batch_x)
+                            outputs = self.model.decode(enc_out)[0]
+                            # outputs = self.model(
+                            #     batch_x, batch_x_mark, dec_inp, batch_y_mark
+                            # )[0]
+                        else: # CHANGED
                             enc_out = self.model.encode(batch_x)
                             outputs = self.model.decode(enc_out)
+                    enc_out = enc_out.detach().cpu().numpy()
                     outputs = outputs.detach().cpu().numpy()
-                    batch_y = batch_y.detach().cpu().numpy()
+                    batch_x = batch_x.detach().cpu().numpy()
                     if (train_data.scale or vali_data.scale) and self.args.inverse:
                         shape = outputs.shape
 
@@ -511,20 +512,24 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                             .inverse_transform(outputs.squeeze(0))
                             .reshape(shape)
                         )
-                        batch_y = (
+                        batch_x = (
                             train_vali_data[flag]
-                            .inverse_transform(batch_y.squeeze(0))
+                            .inverse_transform(batch_x.squeeze(0))
                             .reshape(shape)
                         )
-
+                    real_hidden = enc_out
                     recon = outputs
-                    true = batch_y
+                    true = batch_x
 
+                    real_hiddens.append(real_hidden)
                     recons.append(recon)
                     trues.append(true)
 
+                real_hiddens = np.array(real_hiddens) # TODO
                 recons = np.array(recons)
                 trues = np.array(trues)
+
+                real_hiddens = real_hiddens.reshape(-1, real_hiddens.shape[-2], real_hiddens.shape[-1])
                 recons = recons.reshape(-1, recons.shape[-2], recons.shape[-1])
                 trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
 
@@ -534,13 +539,12 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     os.makedirs(folder_path)
 
                 flag_name = "train" if flag == 0 else "vali"
+                np.save(folder_path + f"real_hiddens_{flag_name}.npy", real_hiddens)
                 np.save(folder_path + f"recons_{flag_name}.npy", recons)
                 np.save(folder_path + f"trues_{flag_name}.npy", trues)
 
-    # plot recnstracted tsne
-    def plot_ori_recon(self, setting):
-        label_len = self.args.label_len
-
+    # plot recnstracted data with tsne and matplotlib
+    def plot_recon_as_tsne(self, setting):
         save_dir = os.path.join("./checkpoints/", setting, "eval_ae/")
 
         flags = ["train", "vali"]
@@ -548,18 +552,17 @@ class Exp_Long_Term_Forecast(Exp_Basic):
             ori_data = np.load(os.path.join(save_dir, f"trues_{flag}.npy"))
             recon_data = np.load(os.path.join(save_dir, f"recons_{flag}.npy"))
 
-            # TimeGAN 参考
-            anal_sample_no = min([1000, len(ori_data)])
+            # codebase: TimeGAN
+            anal_sample_no = min([1000, len(ori_data), len(recon_data)])
             np.random.seed(0)
-            ori_idx = np.random.permutation(len(ori_data))[:anal_sample_no]
-            recon_idx = np.random.permutation(len(recon_data))[:anal_sample_no]
+            ori_idx = np.random.permutation(anal_sample_no)[:anal_sample_no]
 
             ori_data = ori_data[ori_idx]
             recon_data = recon_data[ori_idx]
 
             for i in range(min(recon_data.shape[2], 10)):
                 cat_data = np.concatenate(
-                    [ori_data[:, label_len:, i], recon_data[:, :, i]], axis=0
+                    [ori_data[:, :, i], recon_data[:, :, i]], axis=0
                 )
 
                 print(f"Plotting t-SNE of reconstructed {flag} data")
@@ -606,7 +609,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     fig = plt.figure(figsize=(20, 20))
                     for j in range(9):
                         fig.add_subplot(3, 3, (j + 1))
-                        plt.plot(ori_data[j, label_len:, i], label="trues", linewidth=1)
+                        plt.plot(ori_data[j, :, i], label="trues", linewidth=1)
                         plt.plot(recon_data[j, :, i], label="recons", linewidth=1)
                     plt.legend()
                     plt.title(f"reconstructed {flag} data")
@@ -616,6 +619,45 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         pad_inches=0,
                     )
                     if not self.args.no_wandb:
-                        wandb.log({f"eval/reconstruted/ch{i}": wandb.Image(plt)})
+                        wandb.log({f"eval/reconstruted/ch{i}/{flag}": wandb.Image(plt)})
                     plt.clf()
                     plt.close(fig)
+
+    def plot_multi_hidden_as_tsne(self, ae_setting):
+        data_dir = os.path.join("./checkpoints/", ae_setting, "eval_ae/")
+        save_dir = os.path.join("./checkpoints/", ae_setting, "eval_ae/")
+        real_hiddens = np.load(os.path.join(data_dir, "real_hiddens_train.npy"))
+
+        anal_sample_no = min([1000, len(real_hiddens)])
+        np.random.seed(0)
+        idx = np.random.permutation(anal_sample_no)[:anal_sample_no]
+        real_hiddens = real_hiddens[idx]
+
+        cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        f, ax = plt.subplots(1)
+
+        multi_cat_data = real_hiddens.reshape([-1, real_hiddens.shape[2]])
+        tsne = TSNE(
+            n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
+        )
+        tsne_obj = tsne.fit_transform(multi_cat_data)
+
+        for i in range(real_hiddens.shape[1]):
+            plt.scatter(
+                tsne_obj[i * anal_sample_no : (i + 1) * anal_sample_no, 0], 
+                tsne_obj[i * anal_sample_no : (i + 1) * anal_sample_no, 1],
+                alpha=0.2,
+                label=f"ch{i}",
+                color=cycle[i],
+                s=5,
+            )
+
+            ax.legend()
+        plt.title(f"t-SNE plot of train multi hidden states")
+        plt.xlabel("x-tsne")
+        plt.ylabel("y-tsne")
+        plt.savefig(
+            os.path.join(save_dir, f"tsne_multi_hidden_train.png"),
+            bbox_inches="tight",
+            pad_inches=0,
+        )

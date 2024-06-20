@@ -609,7 +609,7 @@ class Exp_iTransGAN(Exp_Basic):
         )
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        np.save(os.path.join(save_dir, "gen_large.npy"), np.array(data))
+        np.save(os.path.join(save_dir, "gen.npy"), np.array(data))
         
 
     def grad_penalty(self, x_real, x_fake):

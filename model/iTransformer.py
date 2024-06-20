@@ -29,6 +29,7 @@ class Model(nn.Module):
             configs.freq,
             configs.dropout,
         )
+        print("non-conditional AutoEncoder")
         self.class_strategy = configs.class_strategy
         # Encoder-only architecture
         self.encoder = Encoder(
