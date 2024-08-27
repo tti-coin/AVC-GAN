@@ -1,11 +1,6 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
-# Licensed under the MIT License.
-
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-
-# from stock_energy.basic import PositionwiseFeedForward
 
 
 class Generator(nn.Module):
@@ -16,7 +11,7 @@ class Generator(nn.Module):
         self.vari_emb_dim = 32 # TODO
         self.vari_emb = nn.Embedding(c_in, self.vari_emb_dim)
         nn.init.normal_(self.vari_emb.weight, std=0.02) # TODO
-        # v2 network
+        # TODO: decide which network to use
         self.network = nn.Sequential(
             nn.Linear(d_model + self.vari_emb_dim, 2 * d_model),
             nn.ReLU(True),
@@ -31,7 +26,7 @@ class Generator(nn.Module):
         vari_emb = self.vari_emb(torch.arange(self.c_in).to(self.device))
         vari_emb = vari_emb.unsqueeze(0).repeat(noise.size(0), 1, 1)
         gen_input = torch.cat((vari_emb, noise), 2)
-        rep = self.network(gen_input)
+        rep = self.network(gen_input) 
         return rep
 
 
@@ -46,7 +41,7 @@ class Discriminator(nn.Module):
             self.vari_emb.weight, std=0.02
         )
 
-        # v3 network
+        # TODO: decide which network to use
         self.network = nn.Sequential(
             nn.Linear(d_model + self.vari_emb_dim, 2 * d_model),
             nn.LeakyReLU(0.2),

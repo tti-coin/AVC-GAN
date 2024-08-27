@@ -81,5 +81,8 @@ class Model(nn.Module):
         return dec_out
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None):
+        # CHANGED: for TSG setting
+        x_mark_enc = None
+        x_mark_dec = None
         dec_out = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
         return dec_out[:, -self.pred_len:, :]  # [B, L, D]

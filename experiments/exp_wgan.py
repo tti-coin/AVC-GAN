@@ -20,7 +20,8 @@ from torch.autograd import grad as torch_grad
 
 from data_provider.data_factory import data_provider
 from experiments.exp_basic import Exp_Basic
-from model.gan import Discriminator, Generator
+# from model.gan import Discriminator, Generator
+from model.simple_gan import Discriminator, Generator
 from model.iTransformer import Model
 from utils.metrics import metric
 from utils.tools import EarlyStopping, adjust_learning_rate, visual

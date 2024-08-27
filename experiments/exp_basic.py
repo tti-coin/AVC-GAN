@@ -13,14 +13,16 @@ from model import (
     iInformer,
     iReformer,
     iTransformer,
+    ConditionalGAN,
 )
+
 
 
 class Exp_Basic(object):
     def __init__(self, args):
         self.args = args
         self.model_dict = {
-            # 'Transformer': Transformer,
+            'Transformer': Transformer,
             # 'Informer': Informer,
             # 'Reformer': Reformer,
             # 'Flowformer': Flowformer,
@@ -30,11 +32,22 @@ class Exp_Basic(object):
             # 'iReformer': iReformer,
             # 'iFlowformer': iFlowformer,
             # 'iFlashformer': iFlashformer,
+            "ConditionalGAN": ConditionalGAN,
         }
         self.device = self._acquire_device()
         self.model = self._build_model().to(self.device)
+        self.generator = self._build_generator().to(self.device)
+        self.discriminator = self._build_discriminator().to(self.device)
 
     def _build_model(self):
+        raise NotImplementedError
+        return None
+    
+    def _build_generator(self):
+        raise NotImplementedError
+        return None
+    
+    def _build_discriminator(self):
         raise NotImplementedError
         return None
 

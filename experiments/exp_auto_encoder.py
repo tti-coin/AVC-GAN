@@ -24,10 +24,11 @@ class Exp_AutoEncoder(Exp_Basic):
         super(Exp_AutoEncoder, self).__init__(args)
 
     def _build_model(self):
-        model = self.model_dict[self.args.model].Model(self.args).float()
+        model = self.model_dict[self.args.ae_model].Model(self.args, self.device).float()
 
         if self.args.use_multi_gpu and self.args.use_gpu:
             model = nn.DataParallel(model, device_ids=self.args.device_ids)
+        print(model)
         return model
 
     def _get_data(self, flag):
@@ -88,9 +89,11 @@ class Exp_AutoEncoder(Exp_Basic):
                             batch_x, batch_x_mark, dec_inp, batch_y_mark
                         )[0]
                     else:
-                        outputs = self.model(
-                            batch_x, batch_x_mark, dec_inp, batch_y_mark
-                        )
+                        # outputs, _, _ = self.model(
+                        #     batch_x, batch_x_mark, dec_inp, batch_y_mark
+                        # )
+                        enc_out = self.model.encode(batch_x) #  means_hat, stdev_hat
+                        outputs = self.model.decode(enc_out) # , means_hat, stdev_hat
                 f_dim = -1 if self.args.features == "MS" else 0
                 outputs = outputs[:, -self.args.pred_len :, f_dim:]
 
@@ -143,6 +146,7 @@ class Exp_AutoEncoder(Exp_Basic):
         for epoch in range(self.args.train_epochs):
             iter_count = 0
             train_loss = []
+            # to_scaled_loss = []
 
             self.model.train()
             epoch_time = time.time()
@@ -195,18 +199,25 @@ class Exp_AutoEncoder(Exp_Basic):
                             batch_x, batch_x_mark, dec_inp, batch_y_mark
                         )[0]
                     else:
-                        outputs = self.model(
+                        # masking = torch.bernoulli(torch.full(batch_x.shape, 1 - self.args.mask_ratio)).to(self.device)
+                        # means = batch_x.mean(1, keepdim=True)
+                        # stdev = torch.sqrt(
+                        #     torch.var(batch_x, dim=1, keepdim=True, unbiased=False) + 1e-5
+                        # )
+                        outputs, = self.model(
                             batch_x, batch_x_mark, dec_inp, batch_y_mark
-                        )
+                        ) ### CHANGED mean_hat, stdev_hat
 
                     f_dim = -1 if self.args.features == "MS" else 0
                     outputs = outputs[:, -self.args.pred_len :, f_dim:]
                     loss = criterion(outputs, batch_x)  # CHANGED
+                    # loss_to_scaled = criterion(rescaled_hat[:, :, 0], means) + criterion(rescaled_hat[:, :, 1], stdev)
                     train_loss.append(loss.item())
+                    # to_scaled_loss.append(loss_to_scaled.item())
 
                 if (i + 1) % 100 == 0:
                     print(
-                        "\titers: {0}, epoch: {1} | loss: {2:.7f}".format(
+                        "\titers: {0}, epoch: {1} | loss: {2:.7f}" .format(
                             i + 1, epoch + 1, loss.item()
                         )
                     )
@@ -227,7 +238,8 @@ class Exp_AutoEncoder(Exp_Basic):
                     scaler.step(model_optim)
                     scaler.update()
                 else:
-                    loss.backward()
+                    loss.backward(retain_graph=True)
+                    # loss_to_scaled.backward()
                     model_optim.step()
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
@@ -312,10 +324,12 @@ class Exp_AutoEncoder(Exp_Basic):
                         )[0]
 
                     else:
-                        outputs = self.model(
-                            batch_x, batch_x_mark, dec_inp, batch_y_mark
-                        )
-
+                        # outputs = self.model(
+                        #     batch_x, batch_x_mark, dec_inp, batch_y_mark
+                        # ) # TODO
+                        enc_out = self.model.encode(batch_x) # means_hat, stdev_hat
+                        outputs = self.model.decode(enc_out) # means_hat, stdev_hat
+ 
                 f_dim = -1 if self.args.features == "MS" else 0
                 outputs = outputs[:, -self.args.pred_len :, f_dim:]
                 outputs = outputs.detach().cpu().numpy()
@@ -334,17 +348,17 @@ class Exp_AutoEncoder(Exp_Basic):
 
                 preds.append(pred)
                 trues.append(true)
-                if i % 20 == 0:
-                    input = batch_x
-                    # input = batch_x.detach().cpu().numpy()
-                    if test_data.scale and self.args.inverse:
-                        shape = input.shape
-                        input = test_data.inverse_transform(input.squeeze(0)).reshape(
-                            shape
-                        )
-                    gt = np.concatenate((input[0, :, -1], true[0, :, -1]), axis=0)
-                    pd = np.concatenate((input[0, :, -1], pred[0, :, -1]), axis=0)
-                    visual(gt, pd, os.path.join(folder_path, str(i) + ".pdf"))
+                # if i % 20 == 0:
+                #     input = batch_x
+                #     # input = batch_x.detach().cpu().numpy()
+                #     if test_data.scale and self.args.inverse:
+                #         shape = input.shape
+                #         input = test_data.inverse_transform(input.squeeze(0)).reshape(
+                #             shape
+                #         )
+                #     gt = np.concatenate((input[0, :, -1], true[0, :, -1]), axis=0)
+                #     pd = np.concatenate((input[0, :, -1], pred[0, :, -1]), axis=0)
+                #     visual(gt, pd, os.path.join(folder_path, str(i) + ".pdf"))
 
         preds = np.array(preds)
         trues = np.array(trues)
@@ -565,40 +579,40 @@ class Exp_AutoEncoder(Exp_Basic):
                     [ori_data[:, :, i], recon_data[:, :, i]], axis=0
                 )
 
-                print(f"Plotting t-SNE of reconstructed {flag} data")
-                tsne = TSNE(
-                    n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
-                )
-                tsne_obj = tsne.fit_transform(cat_data)
+                # print(f"Plotting t-SNE of reconstructed {flag} data")
+                # tsne = TSNE(
+                #     n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
+                # )
+                # tsne_obj = tsne.fit_transform(cat_data)
 
-                f, ax = plt.subplots(1)
-                plt.scatter(
-                    tsne_obj[: len(ori_data), 0],
-                    tsne_obj[: len(ori_data), 1],
-                    alpha=0.2,
-                    label=f"Original({flag})",
-                )
-                plt.scatter(
-                    tsne_obj[len(ori_data) :, 0],
-                    tsne_obj[len(ori_data) :, 1],
-                    alpha=0.2,
-                    label="Reconstructed",
-                )
+                # f, ax = plt.subplots(1)
+                # plt.scatter(
+                #     tsne_obj[: len(ori_data), 0],
+                #     tsne_obj[: len(ori_data), 1],
+                #     alpha=0.2,
+                #     label=f"Original({flag})",
+                # )
+                # plt.scatter(
+                #     tsne_obj[len(ori_data) :, 0],
+                #     tsne_obj[len(ori_data) :, 1],
+                #     alpha=0.2,
+                #     label="Reconstructed",
+                # )
 
-                ax.legend()
-                plt.title(f"t-SNE plot of reconstructed ch{i} data")
-                plt.xlabel("x-tsne")
-                plt.ylabel("y-tsne")
-                plt.savefig(
-                    os.path.join(save_dir, f"tsne_recon_{flag}_ch{i}.png"),
-                    bbox_inches="tight",
-                    pad_inches=0,
-                )
+                # ax.legend()
+                # plt.title(f"t-SNE plot of reconstructed ch{i} data")
+                # plt.xlabel("x-tsne")
+                # plt.ylabel("y-tsne")
+                # plt.savefig(
+                #     os.path.join(save_dir, f"tsne_recon_{flag}_ch{i}.png"),
+                #     bbox_inches="tight",
+                #     pad_inches=0,
+                # )
 
-                if not self.args.no_wandb:
-                    wandb.log(
-                        {f"eval/t-SNE/reconstructed/ch{i}/{flag}": wandb.Image(plt)}
-                    )
+                # if not self.args.no_wandb:
+                #     wandb.log(
+                #         {f"eval/t-SNE/reconstructed/ch{i}/{flag}": wandb.Image(plt)}
+                #     )
 
                 print(f"Plotting reconstructed {flag} data with matplotlib")
                 outputs_dir = os.path.join("checkpoints", setting, "eval_ae/outputs")

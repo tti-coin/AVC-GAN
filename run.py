@@ -10,24 +10,9 @@ import random
 import numpy as np
 import torch
 
-# from experiments.exp_gan import Exp_iTransGAN
-# TODO: 以下はデコード後の表現で識別器を学習するクラス
-# from experiments.exp_dec_gan import Exp_iTransGAN
-# GPの実装を変更
-from experiments.exp_wgan import Exp_iTransGAN
-
-print("change GP implimentation")
-
-# from experiments.exp_test import Exp_Long_Term_Forecast
-from experiments.exp_long_term_forecasting import Exp_Long_Term_Forecast
+from experiments.exp_auto_encoder import Exp_AutoEncoder
+from experiments.exp_conditional_gan import Exp_iTransGAN
 from experiments.exp_long_term_forecasting_partial import Exp_Long_Term_Forecast_Partial
-from utils.visualize_data import (
-    plot_dec_tsne,
-    plot_gen_data,
-    plot_hidden_tsne,
-    plot_recon_data,
-    plot_recon_tsne,
-)
 
 if __name__ == "__main__":
     fix_seed = 2023
@@ -37,16 +22,17 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="iTransformer")
 
-    # basic config
-    parser.add_argument("--is_ae_training", type=int, default=1, help="status")
-    parser.add_argument("--is_gan_training", type=int, default=0, help="status")
-    parser.add_argument("--is_gan_evaluating", type=int, default=0, help="status")
-    parser.add_argument("--is_synthesizig", type=int, default=0, help="status")
+    # basic experiment setting
+    parser.add_argument("--training_ae", type=int, default=1, help="status")
+    parser.add_argument("--training_gan", type=int, default=0, help="status")
+    parser.add_argument("--evaluating_gan", type=int, default=0, help="status")
+    parser.add_argument("--synthesizing", type=int, default=0, help="status")
+
     parser.add_argument(
         "--model_id", type=str, required=True, default="test", help="model id"
     )
     parser.add_argument(
-        "--model",
+        "--ae_model",
         type=str,
         required=True,
         default="iTransformer",
@@ -54,6 +40,7 @@ if __name__ == "__main__":
     )
 
     # data loader
+    parser.add_argument("--pin_memory", type=bool, default=True, help="pin memory")
     parser.add_argument(
         "--data", type=str, required=True, default="custom", help="dataset type"
     )
@@ -97,7 +84,7 @@ if __name__ == "__main__":
         "--pred_len", type=int, default=96, help="prediction sequence length"
     )
 
-    # model define
+    #### AutoEncoder setting
     parser.add_argument("--enc_in", type=int, default=7, help="encoder input size")
     parser.add_argument("--dec_in", type=int, default=7, help="decoder input size")
     parser.add_argument(
@@ -119,6 +106,9 @@ if __name__ == "__main__":
         default=True,
     )
     parser.add_argument("--dropout", type=float, default=0.1, help="dropout")
+    # added for MLM
+    parser.add_argument("--vari_masked_ratio", type=float, default=0.5)
+    parser.add_argument("--mask_ratio", type=float, default=0.4)
     parser.add_argument(
         "--embed",
         type=str,
@@ -146,7 +136,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--fix_gan", default=None, help="test mode for GAN")
 
-    # GAN setting
+    ### GAN setting
     parser.add_argument("--gan_model_id", type=str, default="test", help="gan model id")
     parser.add_argument(
         "--gan_batch_size", type=int, default=1024, help="batch size of WGAN"
@@ -173,9 +163,13 @@ if __name__ == "__main__":
         default=5,
         help="discriminator updates per generator update",
     )
+    parser.add_argument(
+        "--use_hidden", action="store_true", help="use hidden states for GAN training"
+    )
+
     # synthtesizing
     parser.add_argument(
-        "--iter_used", type=int, default=19999, help="which iteration of model to use"
+        "--load_iter", type=int, default=19999, help="which iteration of model to use"
     )
     parser.add_argument(
         "--sample_size", type=int, default=2048, help="sample size of synthetic data"
@@ -270,7 +264,18 @@ if __name__ == "__main__":
         "you can select [partial_start_index, min(enc_in + partial_start_index, N)]",
     )
 
+    # wandb
     parser.add_argument("--no_wandb", action="store_true", help="Disable wandb")
+    parser.add_argument(
+        "--wandb_notes", type=str, default="test", help="desctiption of experiment"
+    )
+    # parser.add_argument("--wandb_entity", type=str, default="test", help="wandb entity")
+    # parser.add_argument("--wandb_project", type=str, default="test", help="wandb project")
+    parser.add_argument(
+        "--wandb_run_name", type=str, default="test", help="wandb run name"
+    )
+    # parser.add_argument("--wandb_group", type=str, default="test", help="wandb group")
+    # parser.add_argument("--wandb_tags", type=str, default="test", help="wandb tags")
 
     args = parser.parse_args()
     args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
@@ -284,20 +289,21 @@ if __name__ == "__main__":
     print("Args in experiment:")
     print(args)
 
-    if args.exp_name == "partial_train":  # See Figure 8 of our paper, for the detail
-        Exp = Exp_Long_Term_Forecast_Partial
-    elif args.exp_name == "gan":
-        Exp = Exp_iTransGAN
-    else:  # MTSF: multivariate time series forecasting
-        Exp = Exp_Long_Term_Forecast
+    args_dict = vars(args)
+    args.model_id = f"{args.model_id}_{args.des}_sl{args.seq_len}_pl{args.pred_len}"
+    args.gan_model_id = f"{args.gan_model_id}_{args.des}_pl{args.pred_len}_vmr{args.vari_masked_ratio}_mr{args.mask_ratio}_hd{args.use_hidden}_du{args.d_update}"
 
-    # Training Mode for iTransformer AutoEncoder
-    if args.is_ae_training:  # TODO: この場合分けいる？？
-        assert args.exp_name != "gan"
+    if args.training_ae:
+        # if args.exp_name == "partial_train":  # See Figure 8 of our paper, for the detail
+        #     Exp = Exp_Long_Term_Forecast_Partial
+        # MTSF: multivariate time series forecasting
+        Exp = Exp_AutoEncoder
+
+        # if args.is_ae_training:
         for ii in range(args.itr):
-            ae_setting = "{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}_{}".format(
+            ae_setting = "{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_vmr{}_mr{}_dt{}_lr{}_{}_{}_{}".format(
                 args.model_id,
-                args.model,
+                args.ae_model,
                 args.data,
                 args.features,
                 args.seq_len,
@@ -310,7 +316,10 @@ if __name__ == "__main__":
                 args.d_ff,
                 args.factor,
                 args.embed,
+                args.vari_masked_ratio,
+                args.mask_ratio,
                 args.distil,
+                args.learning_rate,
                 args.des,
                 args.class_strategy,
                 ii,
@@ -321,159 +330,169 @@ if __name__ == "__main__":
             if not args.no_wandb and ii == 0:
                 import wandb
 
-                run_name = ae_setting
                 if not os.path.exists(os.path.join("/workspace/logs/" + ae_setting)):
                     os.makedirs(os.path.join("/workspace/logs/" + ae_setting))
                 wandb.init(
-                    config={},
-                    name=run_name,
-                    project=f"iTransAE_{args.data}",
+                    project="Masked-iTransGAN",
+                    config=args,
+                    tags=["AE"],
+                    name=args.model_id,
+                    notes=args.wandb_notes,
                     dir=os.path.join("/workspace/logs/" + ae_setting),
+                    # resume="allow",
+                    # id=args.wandb_id,
                 )
             else:
                 wandb = None
 
-            print("Start AE training")
+            print("========== Start AE training ==========")
             exp.train(ae_setting)
 
-            print("Start AE evaluation")
+            print("========== Start AE evaluation ==========")
             print("Reconstructing from training and validation data")
-            exp.recon_from_train_vali(ae_setting, True)
+            exp.save_recon_as_npy(ae_setting, True)
+
             print("Plotting original and reconstructed data")
-            exp.plot_ori_recon(ae_setting)
+            exp.plot_recon_as_tsne(ae_setting)
+            # exp.plot_multi_hidden_as_tsne(ae_setting)
+            # pdb.set_trace()
+
+            print(
+                ">>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(
+                    ae_setting
+                )
+            )
+            exp.test(ae_setting, test=1)
+            torch.cuda.empty_cache()
+
+    if args.training_gan:
+        assert args.gan_model_id is not None
+        Exp = Exp_iTransGAN
+        args.exp_name = "gan"
+
+        for ii in range(args.itr):
+            ae_setting = "{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_vmr{}_mr{}_dt{}_lr{}_{}_{}_{}".format(
+                args.model_id,
+                args.ae_model,
+                args.data,
+                args.features,
+                args.seq_len,
+                args.label_len,
+                args.pred_len,
+                args.d_model,
+                args.n_heads,
+                args.e_layers,
+                args.d_layers,
+                args.d_ff,
+                args.factor,
+                args.embed,
+                args.vari_masked_ratio,
+                args.mask_ratio,
+                args.distil,
+                args.learning_rate,
+                args.des,
+                args.class_strategy,
+                ii,
+            )
+
+            gan_setting = "{}_gbsz{}_glr{}_dlr{}_nd{}_du{}_hd{}".format(
+                args.gan_model_id,
+                args.gan_batch_size,
+                args.gen_lr,
+                args.disc_lr,
+                args.noise_dim,
+                args.d_update,
+                args.use_hidden,
+            )
+
+            exp = Exp(args)  # set experiments
+
+            if not args.no_wandb:
+                import wandb
+
+                if not os.path.exists(
+                    os.path.join("/workspace/logs/gan" + gan_setting)
+                ):
+                    os.makedirs(os.path.join("/workspace/logs/gan" + gan_setting))
+                wandb.init(
+                    project="Masked-iTransGAN",
+                    config=args,
+                    tags=["GAN"],
+                    name=args.gan_model_id,
+                    notes=args.wandb_notes,
+                    dir=os.path.join("/workspace/logs/" + gan_setting),
+                )
+            else:
+                wandb = None
+
+            print("Start training iTransGAN")
+            exp.train_gan(ae_setting, gan_setting)
 
             torch.cuda.empty_cache()
 
-    # Training Mode for iTranGAN
-    elif args.is_gan_training:
-        assert args.exp_name == "gan"
+    if args.evaluating_gan:
         assert args.gan_model_id is not None
+        Exp = Exp_iTransGAN
+        args.exp_name = "gan"
 
-        ii = 0
-        ae_setting = "{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}_{}".format(
-            args.model_id,
-            args.model,
-            args.data,
-            args.features,
-            args.seq_len,
-            args.label_len,
-            args.pred_len,
-            args.d_model,
-            args.n_heads,
-            args.e_layers,
-            args.d_layers,
-            args.d_ff,
-            args.factor,
-            args.embed,
-            args.distil,
-            args.des,
-            args.class_strategy,
-            ii,
-        )
-
-        gan_setting = "{}_gbsz{}_glr{}_dlr{}_nd{}_du{}".format(
-            args.gan_model_id,
-            args.gan_batch_size,
-            args.gen_lr,
-            args.disc_lr,
-            args.noise_dim,
-            args.d_update,
-        )
-
-        exp = Exp(args)  # set experiments
-
-        if not args.no_wandb:
-            import wandb
-
-            run_name = gan_setting
-            if not os.path.exists(os.path.join("/workspace/logs/gan" + gan_setting)):
-                os.makedirs(os.path.join("/workspace/logs/gan" + gan_setting))
-            wandb.init(
-                config={},
-                name=run_name,
-                project=f"iTransGAN_{args.data}",
-                dir=os.path.join("/workspace/logs/" + gan_setting),
+        for ii in range(args.itr):
+            ae_setting = "{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_vmr{}_mr{}_dt{}_lr{}_{}_{}_{}".format(
+                args.model_id,
+                args.ae_model,
+                args.data,
+                args.features,
+                args.seq_len,
+                args.label_len,
+                args.pred_len,
+                args.d_model,
+                args.n_heads,
+                args.e_layers,
+                args.d_layers,
+                args.d_ff,
+                args.factor,
+                args.embed,
+                args.vari_masked_ratio,
+                args.mask_ratio,
+                args.distil,
+                args.learning_rate,
+                args.des,
+                args.class_strategy,
+                ii,
             )
-            # wandb.config.update(setting)
-        else:
-            wandb = None
 
-        print(
-            ">>>>>>>start training GAN : {}>>>>>>>>>>>>>>>>>>>>>>>>>>".format(
-                gan_setting
+            gan_setting = "{}_gbsz{}_glr{}_dlr{}_nd{}_du{}_hd{}".format(
+                args.gan_model_id,
+                args.gan_batch_size,
+                args.gen_lr,
+                args.disc_lr,
+                args.noise_dim,
+                args.d_update,
+                args.use_hidden,
             )
-        )
-        exp.train_gan(ae_setting, gan_setting)
 
-        print(
-            ">>>>>>>generating hidden states and real representations for evaluating GAN: {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(
-                gan_setting
-            )
-        )
-        exp.eval_gan(ae_setting, gan_setting)
+            exp = Exp(args)
+
+        print("Start iTransGAN evaluatining")
+        exp.save_hiddens_and_generated_as_npy(ae_setting, gan_setting)
 
         print("plotting some hidden states and real representations with t-SNE")
-        plot_hidden_tsne(ae_setting, gan_setting)
+        exp.plot_hidden_tsne(ae_setting, gan_setting)
+
+        print("Plotting generated data with t-SNE and matplotlib")
+        exp.plot_dec_tsne(ae_setting, gan_setting)
+        exp.plot_gen_data(ae_setting, gan_setting)
 
         torch.cuda.empty_cache()
 
-    # elif args.is_gan_evaluating:
-    #     assert args.exp_name == "gan"
-    #     assert args.gan_model_id is not None
-
-    #     ii = 0
-    #     ae_setting = "{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}_{}".format(
-    #         args.model_id,
-    #         args.model,
-    #         args.data,
-    #         args.features,
-    #         args.seq_len,
-    #         args.label_len,
-    #         args.pred_len,
-    #         args.d_model,
-    #         args.n_heads,
-    #         args.e_layers,
-    #         args.d_layers,
-    #         args.d_ff,
-    #         args.factor,
-    #         args.embed,
-    #         args.distil,
-    #         args.des,
-    #         args.class_strategy,
-    #         ii,
-    #     )
-
-    #     gan_setting = "{}_gbsz{}_glr{}_dlr{}_nd{}_du{}".format(
-    #         args.gan_model_id,
-    #         args.gan_batch_size,
-    #         args.gen_lr,
-    #         args.disc_lr,
-    #         args.noise_dim,
-    #         args.d_update,
-    #     )
-
-    #     exp = Exp(args)
-
-    #     print(
-    #         ">>>>>>>generating hidden states and real representations for evaluating GAN: {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(
-    #             gan_setting
-    #         )
-    #     )
-    #     exp.eval_gan(ae_setting, gan_setting)
-
-    #     print("plotting some hidden states and real representations with t-SNE")
-    #     plot_hidden_tsne(ae_setting, gan_setting)
-
-    #     torch.cuda.empty_cache()
-
-    elif args.is_synthesizig:
-        assert args.exp_name == "gan"
+    if args.synthesizing:
         assert args.gan_model_id is not None
+        Exp = Exp_iTransGAN
+        args.exp_name = "gan"
 
         ii = 0
-        ae_setting = "{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}_{}".format(
+        ae_setting = "{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_vmr{}_mr{}_dt{}_lr{}_{}_{}_{}".format(
             args.model_id,
-            args.model,
+            args.ae_model,
             args.data,
             args.features,
             args.seq_len,
@@ -486,68 +505,29 @@ if __name__ == "__main__":
             args.d_ff,
             args.factor,
             args.embed,
+            args.vari_masked_ratio,
+            args.mask_ratio,
             args.distil,
+            args.learning_rate,
             args.des,
             args.class_strategy,
             ii,
         )
 
-        gan_setting = "{}_gbsz{}_glr{}_dlr{}_nd{}_du{}".format(
+        gan_setting = "{}_gbsz{}_glr{}_dlr{}_nd{}_du{}_hd{}".format(
             args.gan_model_id,
             args.gan_batch_size,
             args.gen_lr,
             args.disc_lr,
             args.noise_dim,
             args.d_update,
+            args.use_hidden,
         )
 
         exp = Exp(args)  # set experiments
 
-        print(
-            ">>>>>>>synthesizing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(
-                gan_setting
-            )
-        )
+        print("Start synthesizing data and save them to npy files")
+        # exp.save_synth_data_as_h5(ae_setting, gan_setting)
+        exp.save_synth_data_as_npy(ae_setting, gan_setting)
 
-        # exp.eval_gan(ae_setting, gan_setting) # TODO
-        # plot_hidden_tsne(ae_setting, gan_setting)
-        # pdb.set_trace()
-
-        exp.synthesize(ae_setting, gan_setting)
-
-        print("plotting some generated data")
-        plot_gen_data(ae_setting, gan_setting)
-
-        print("plotting some decoded data with t-SNE")
-        plot_dec_tsne(ae_setting, gan_setting)
-
-        torch.cuda.empty_cache()
-
-    # Test Mode for iTransformer
-    else:
-        ii = 0
-        ae_setting = "{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}_{}".format(
-            args.model_id,
-            args.model,
-            args.data,
-            args.features,
-            args.seq_len,
-            args.label_len,
-            args.pred_len,
-            args.d_model,
-            args.n_heads,
-            args.e_layers,
-            args.d_layers,
-            args.d_ff,
-            args.factor,
-            args.embed,
-            args.distil,
-            args.des,
-            args.class_strategy,
-            ii,
-        )
-
-        exp = Exp(args)  # set experiments
-        print(">>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(ae_setting))
-        exp.test(ae_setting, test=1)
         torch.cuda.empty_cache()

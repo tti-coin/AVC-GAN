@@ -1,5 +1,5 @@
 """
-CHANGED: function of grad_penalty
+CHANGED: function of grad_penalty, dataloader
 """
 
 import os
@@ -20,7 +20,8 @@ from torch.autograd import grad as torch_grad
 
 from data_provider.data_factory import data_provider
 from experiments.exp_basic import Exp_Basic
-from model.gan import Discriminator, Generator
+
+# from model.gan import Discriminator, Generator  # SetDiscriminator
 from model.iTransformer import Model
 from utils.metrics import metric
 from utils.tools import EarlyStopping, adjust_learning_rate, visual
@@ -31,71 +32,60 @@ warnings.filterwarnings("ignore")
 class Exp_iTransGAN(Exp_Basic):
     def __init__(self, args):
         super(Exp_iTransGAN, self).__init__(args)
-        self.device = self._acquire_device()
-        self.generator = Generator(
-            self.args.enc_in, self.args.noise_dim, self.device
-        ).to(
-            self.device
-        )  # FIXME
-        print(self.generator)
-        if self.args.use_hidden:
-            self.discriminator = Discriminator(
-                self.args.enc_in, self.args.noise_dim, self.device
-            ).to(self.device)
-        # self.discriminator = Discriminator(self.args.noise_dim).to(self.device)
-        else:
-            self.discriminator = Discriminator(
-                self.args.enc_in, self.args.pred_len, self.device
-            ).to(self.device)
-        print(self.discriminator)
-
-        self.discriminator_optm = torch.optim.RMSprop(
-            params=self.discriminator.parameters(),
-            lr=self.args.gen_lr,
-            alpha=self.args.gan_alpha,
-        )
-        self.generator_optm = torch.optim.RMSprop(
-            params=self.generator.parameters(),
-            lr=self.args.disc_lr,
-            alpha=self.args.gan_alpha,
-        )
 
     def _build_model(self):
-        model = self.model_dict[self.args.model].Model(self.args).float()
+        model = (
+            self.model_dict[self.args.ae_model].Model(self.args, self.device).float()
+        )
         return model
+
+    def _build_generator(self):
+        generator = (
+            self.model_dict["ConditionalGAN"]
+            .Generator(self.args.enc_in, self.args.noise_dim, self.device)
+            .float()
+        )
+        return generator
+
+    def _build_discriminator(self):
+        discriminator = self.model_dict["ConditionalGAN"].Discriminator(
+            self.args.enc_in, self.args.noise_dim, self.device
+        )
+        return discriminator
 
     def _get_data(self, flag):
         data_set, data_loader = data_provider(self.args, flag)
         return data_set, data_loader
 
-    def load_ae(self, setting):
-        self.ae.load_state_dict(
-            torch.load(os.path.join("./checkpoints/" + setting, "checkpoint.pth"))
+    def _select_optimizer(self):
+        model_optim = optim.Adam(self.model.parameters(), lr=self.args.learning_rate)
+        generator_optim = torch.optim.RMSprop(
+            params=self.generator.parameters(),
+            lr=self.args.disc_lr,
+            alpha=self.args.gan_alpha,
         )
-
-    def load_generator(self, pretrained_dir=None):
-        if pretrained_dir is not None:
-            path = pretrained_dir
-        else:
-            path = "{}/generator.dat".format(self.params["root_dir"])
-        self.logger.info("load: " + path)
-        self.generator.load_state_dict(torch.load(path, map_location=self.device))
+        discriminator_optim = torch.optim.RMSprop(
+            params=self.discriminator.parameters(),
+            lr=self.args.gen_lr,
+            alpha=self.args.gan_alpha,
+        )
+        return model_optim, generator_optim, discriminator_optim
 
     def train_gan(self, ae_setting, gan_setting):
-        print("Loading trained AutoEncoder model")
         self.model.load_state_dict(
             torch.load(
-                os.path.join("/workspace/checkpoints/", ae_setting, "checkpoint.pth")
+                "/workspace/checkpoints/masked_ae_ettm2_sl192_pl192_iTransformer_ETTm2_ftM_sl192_ll48_pl192_dm256_nh8_el2_dl1_df512_fc1_ebtimeF_vmr0.3_mr0.5_dtTrue_lr0.001_ettm2_projection_0/checkpoint.pth"
             )
         )
+        print("Loaded trained AutoEncoder")
 
         _, train_loader = self._get_data(flag="train")
-        # vali_data, vali_loader = self._get_data(flag='val')
-        # test_data, test_loader = self._get_data(flag='test')
 
-        self.discriminator.train()
         self.generator.train()
-        self.model.eval()  # TODO
+        self.discriminator.train()
+        self.model.eval()
+
+        _, generator_optim, discriminator_optim = self._select_optimizer()
 
         save_dir = os.path.join("/workspace/checkpoints/", ae_setting, gan_setting)
         if not os.path.exists(save_dir):
@@ -105,7 +95,9 @@ class Exp_iTransGAN(Exp_Basic):
         d_update = self.args.d_update
 
         for iteration in range(gan_iter):
+            dataloader_iter = iter(train_loader)
             avg_d_loss = 0
+            avg_d_set_loss = 0
             t1 = time.time()
 
             toggle_grad(self.generator, False)
@@ -115,24 +107,47 @@ class Exp_iTransGAN(Exp_Basic):
 
             # train discriminator
             for j in range(d_update):
-                for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
-                    train_loader
-                ):
-                    _, seq_len, N = batch_x.size()
-                    self.discriminator_optm.zero_grad()
+                for i in range(len(train_loader)):
+                    try:
+                        batch_x, _, _, _ = next(dataloader_iter)
+                    except StopIteration:
+                        dataloader_iter = iter(train_loader)
+                        batch_x, _, _, _ = next(dataloader_iter)
+
+                    discriminator_optim.zero_grad()
                     z = torch.randn(
-                        self.args.gan_batch_size, self.args.enc_in, self.args.noise_dim
-                    ).to(self.device)
+                        self.args.gan_batch_size,
+                        self.args.enc_in,
+                        self.args.noise_dim,
+                        device=self.device,
+                    )
 
                     real_rep = self.model.encode(batch_x.float().to(self.device))
+
+                    ### CHANGED: for shuffled fake data
+                    mixed_rep = torch.empty_like(real_rep)
+                    indices = (
+                        torch.empty(
+                            (real_rep.shape[0], real_rep.shape[1]), device=self.device
+                        )
+                        .random_(0, real_rep.shape[0])
+                        .long()
+                    )
+                    for i in range(real_rep.shape[0]):
+                        batch_indices = torch.randint(
+                            0, real_rep.shape[0], (real_rep.shape[1],)
+                        )
+                        indices[i] = batch_indices
+                    mixed_rep = real_rep[indices, torch.arange(real_rep.shape[1])]
+
                     if self.args.use_hidden:
                         d_real = self.discriminator(real_rep)
+                        # d_set_real = self.set_discriminator(real_rep)
                     else:
                         real_dec = self.model.decode(
                             real_rep
                         )  # real_dec: (batch_size, seq_len, N)
                         d_real = self.discriminator(torch.permute(real_dec, (0, 2, 1)))
-                    # d_real = self.discriminator(real_rep)
 
                     # On fake data
                     with torch.no_grad():
@@ -141,6 +156,10 @@ class Exp_iTransGAN(Exp_Basic):
                     x_fake.requires_grad_()
                     if self.args.use_hidden:
                         d_fake = self.discriminator(x_fake)
+                        d_fake_set = self.discriminator(
+                            mixed_rep.float().to(self.device)
+                        )  # CHANGED
+                        # d_set_fake = self.set_discriminator(x_fake)
                     else:
                         fake_dec = self.model.decode(x_fake)
                         d_fake = self.discriminator(torch.permute(fake_dec, (0, 2, 1)))
@@ -148,27 +167,42 @@ class Exp_iTransGAN(Exp_Basic):
                     # get gradient penalty
                     if self.args.use_hidden:
                         gradient_penalty = self.grad_penalty(real_rep, x_fake)
+                        # set_gradient_penalty = self.grad_penalty(
+                        #     real_rep.reshape(real_rep.shape[0], -1),
+                        #     x_fake.reshape(x_fake.shape[0], -1),
+                        # )
                     else:
                         gradient_penalty = self.grad_penalty(real_dec, fake_dec)
 
+                    # d_loss = d_fake.mean() + d_set_fake.mean() - d_real.mean() - d_set_real.mean() + gradient_penalty + set_gradient_penalty
+                    d_loss = (
+                        d_fake.mean()
+                        + d_fake_set.mean()
+                        - d_real.mean()
+                        + gradient_penalty
+                    )
                     d_loss = d_fake.mean() - d_real.mean() + gradient_penalty
                     d_loss.backward()
 
-                    self.discriminator_optm.step()
+                    discriminator_optim.step()
                     avg_d_loss += (d_fake.mean() - d_real.mean()).item()
                     break
 
             avg_d_loss /= d_update
+            avg_d_set_loss /= d_update
 
             # train generator
             toggle_grad(self.generator, True)
             toggle_grad(self.discriminator, False)
             self.generator.train()
             self.discriminator.train()
-            self.generator_optm.zero_grad()
+            generator_optim.zero_grad()
             z = torch.randn(
-                self.args.gan_batch_size, self.args.enc_in, self.args.noise_dim
-            ).to(self.device)
+                self.args.gan_batch_size,
+                self.args.enc_in,
+                self.args.noise_dim,
+                device=self.device,
+            )
             fake = self.generator(z)
 
             if self.args.use_hidden:
@@ -177,9 +211,9 @@ class Exp_iTransGAN(Exp_Basic):
                 fake_data = self.model.decode(fake)
                 g_loss = -self.discriminator(torch.permute(fake_data, (0, 2, 1))).mean()
             g_loss.backward()
-            self.generator_optm.step()
+            generator_optim.step()
 
-            if (iteration + 1) % 100 == 0:
+            if (iteration + 1) % 10 == 0:
                 print(
                     "[Iteration: %d/%d] [Time: %f] [D_loss: %f] [G_loss: %f] [gp: %f]"
                     % (
@@ -197,6 +231,7 @@ class Exp_iTransGAN(Exp_Basic):
                     "train/loss/d_loss": avg_d_loss,
                     "train/loss/d_loss_real": d_real.mean(),
                     "train/loss/d_loss_fake": d_fake.mean(),
+                    "train/loss/d_loss_fake_set": d_fake_set.mean(),
                     "train/loss/g_loss": g_loss.item(),
                     "train/loss/gradient_penalty": gradient_penalty.item(),
                 }
@@ -273,7 +308,9 @@ class Exp_iTransGAN(Exp_Basic):
             # if self.wandb is not None:
             #     self.wandb.log(log_dict)
 
-        print(f"Save {iteration + 1}iter WGAN model")
+            # print("Time for training gnerator: ", time.time() - time_iter)
+            # print(time.time() - t1,)
+
         torch.save(
             self.generator.state_dict(),
             os.path.join(
@@ -281,6 +318,14 @@ class Exp_iTransGAN(Exp_Basic):
                 f"generator_iter{iteration + 1}.dat",
             ),
         )
+        torch.save(
+            self.discriminator.state_dict(),
+            os.path.join(
+                save_dir,
+                f"disc_iter{iteration + 1}.dat",
+            ),
+        )
+        print(f"Saved {iteration + 1}iter Conditional-WGAN")
 
     def save_hiddens_and_generated_as_npy(self, ae_setting, gan_setting):
         """
@@ -328,7 +373,7 @@ class Exp_iTransGAN(Exp_Basic):
             os.makedirs(save_dir)
         np.save(
             os.path.join(save_dir, "fake_hiddens.npy"), hiddens
-        )  ### FIXME: shape (batch, noise_dim, enc_in)
+        )  # FIXME: shape (batch, noise_dim, enc_in)
 
         save_data_dir = os.path.join(
             "./checkpoints/",
@@ -399,12 +444,19 @@ class Exp_iTransGAN(Exp_Basic):
             gan_setting,
             f"generated_data_iter{self.args.load_iter}/",
         )
-        
-        ori_data = np.load(os.path.join("./data/preprocessed_datasets", self.args.des, f"sl{self.args.seq_len}", "prepro_train_shuffled.npy")) # TODO: vari に対応させる
+
+        ori_data = np.load(
+            os.path.join(
+                "./data/preprocessed_datasets",
+                self.args.des,
+                f"sl{self.args.seq_len}",
+                "prepro_train_shuffled.npy",
+            )
+        )  # TODO: vari に対応させる
         gen_data = np.load(os.path.join(save_dir, "sample_data.npy"))
         print(f"ori_data.shape: {ori_data.shape}")
         print(f"gen_data.shape: {gen_data.shape}")
-        
+
         anal_sample_no = min([1000, len(ori_data), len(gen_data)])
         print(f"anal_sample_no: {anal_sample_no}")
         np.random.seed(0)
@@ -449,9 +501,7 @@ class Exp_iTransGAN(Exp_Basic):
             )
 
             if not self.args.no_wandb:
-                wandb.log(
-                    {f"eval/t-SNE/decoded/ch{i}": wandb.Image(plt)}
-                )
+                wandb.log({f"eval/t-SNE/decoded/ch{i}": wandb.Image(plt)})
             plt.clf()
 
     def plot_gen_data(self, ae_setting, gan_setting):
@@ -573,7 +623,7 @@ class Exp_iTransGAN(Exp_Basic):
         )
         self.model.eval()
         self.generator.eval()
-        
+
         def _gen(batch_size):
             with torch.no_grad():
                 z = torch.randn(batch_size, self.args.enc_in, self.args.noise_dim).to(
@@ -584,7 +634,7 @@ class Exp_iTransGAN(Exp_Basic):
                 dynamics = dec_out[:, -self.args.pred_len :, :].squeeze().cpu().numpy()
             res = []
             for i in range(batch_size):
-                #dyn = self.dynamic_processor.inverse_transform(dynamics[i]).values.tolist()
+                # dyn = self.dynamic_processor.inverse_transform(dynamics[i]).values.tolist()
                 dyn = dynamics[i].tolist()
                 res.append(dyn)
             return res
@@ -598,7 +648,7 @@ class Exp_iTransGAN(Exp_Basic):
         for i in range(tt):
             data.extend(_gen(sample_batch_size))
         res = self.args.sample_size - tt * sample_batch_size
-        if res>0:
+        if res > 0:
             data.extend(_gen(res))
 
         save_dir = os.path.join(
@@ -610,34 +660,50 @@ class Exp_iTransGAN(Exp_Basic):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         np.save(os.path.join(save_dir, "gen.npy"), np.array(data))
-        
 
-    def grad_penalty(self, x_real, x_fake):
+    def grad_penalty(self, x_real, x_fake):  # TODO: set はどう扱う？
         batch_size = x_real.size(0)
         gp_weight = 10
 
-        alpha = torch.rand(batch_size, 1, 1).to(self.device)
+        if x_real.dim() == 2:
+            alpha = torch.rand(batch_size, 1, device=self.device)
+        elif x_real.dim() == 3:
+            alpha = torch.rand(batch_size, 1, 1, device=self.device)
         alpha = alpha.expand_as(x_real)
 
-        interpolated = alpha * x_real + (1 - alpha) * x_fake
-        interpolated = Variable(interpolated, requires_grad=True).to(self.device)
+        interpolated = (alpha * x_real + (1 - alpha) * x_fake).requires_grad_(True)
+        # interpolated = Variable(interpolated, requires_grad=True)
 
         # Calculate probability of interpolated examples
         if self.args.use_hidden:
             prob_interpolated = self.discriminator(interpolated)
+            # if x_real.dim() == 2:
+            #     prob_interpolated = self.set_discriminator(interpolated)
+            # if x_real.dim() == 3:
+            #     prob_interpolated = self.discriminator(interpolated)
         else:
             prob_interpolated = self.discriminator(
                 torch.permute(interpolated, (0, 2, 1))
             )
 
         # Calculate gradients of probabilities with respect to examples
-        gradients = torch_grad(
+        # gradients = torch_grad(
+        #     outputs=prob_interpolated,
+        #     inputs=interpolated,
+        #     grad_outputs=torch.ones(prob_interpolated.size(), device=self.device),
+        #     create_graph=True,
+        #     retain_graph=True,
+        # )[0]
+        gradients = torch.autograd.grad(
             outputs=prob_interpolated,
             inputs=interpolated,
-            grad_outputs=torch.ones(prob_interpolated.size()).to(self.device),
+            grad_outputs=torch.ones(prob_interpolated.size(), device=self.device),
             create_graph=True,
             retain_graph=True,
-        )[0]
+        )[
+            0
+        ]  # CHANGED:
+
         gradients = gradients.contiguous().view(batch_size, -1)
 
         eps = 1e-10

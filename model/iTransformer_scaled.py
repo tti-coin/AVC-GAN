@@ -60,9 +60,8 @@ class Model(nn.Module):
             norm_layer=torch.nn.LayerNorm(configs.d_model),
         )
         # print(self.encoder)
-        # self.means_predictor = nn.Linear(configs.d_model, 1, bias=True)
-        # self.stdev_predictor = nn.Linear(configs.d_model, 1, bias=True)
-        # self.rescaled_predictor = nn.Linear(configs.d_model, 2, bias=True)
+        self.means_predictor = nn.Linear(configs.d_model, 1, bias=True)
+        self.stdev_predictor = nn.Linear(configs.d_model, 1, bias=True)
 
         self.projector = nn.Linear(configs.d_model, configs.pred_len, bias=True)
 
