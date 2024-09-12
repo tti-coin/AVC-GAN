@@ -3,29 +3,19 @@ import os
 import torch
 
 from model import (
-    iTransformer,
     SAGAN,
-    ConditionalSAGAN,
 )
 
 
-class Exp_Basic(object):
+class Exp_Basic_SA(object):
     def __init__(self, args):
         self.args = args
         self.model_dict = {
-            "iTransformer": iTransformer,
             "SAGAN": SAGAN,
-            "ConditionalSAGAN": ConditionalSAGAN,
         }
         self.device = self._acquire_device()
-        self.model = self._build_model().to(self.device)
-        if args.exp_name == "gan":
-            self.generator = self._build_generator().to(self.device)
-            self.discriminator = self._build_discriminator().to(self.device)
-
-    def _build_model(self):
-        raise NotImplementedError
-        return None
+        self.generator = self._build_generator().to(self.device)
+        self.discriminator = self._build_discriminator().to(self.device)
 
     def _build_generator(self):
         raise NotImplementedError

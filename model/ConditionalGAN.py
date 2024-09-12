@@ -47,6 +47,8 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.2),
             nn.Linear(2 * d_model, 4 * d_model),
             nn.LeakyReLU(0.2),
+            nn.Linear(4 * d_model, 4 * d_model), # CHANGED: added 8/28
+            nn.LeakyReLU(0.2),
             nn.Linear((4 * d_model), 2 * d_model),
             nn.LeakyReLU(0.2),
             nn.Linear(2 * d_model, 1),

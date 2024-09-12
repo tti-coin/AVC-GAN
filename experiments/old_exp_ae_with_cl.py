@@ -10,6 +10,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import wandb
 from sklearn.manifold import TSNE
+
+# from torch.optim import lr_scheduler
+from timm.scheduler import CosineLRScheduler
 from torch import optim
 
 from data_provider.data_factory import data_provider
@@ -25,7 +28,13 @@ class Exp_AutoEncoder(Exp_Basic):
         super(Exp_AutoEncoder, self).__init__(args)
 
     def _build_model(self):
-        model = self.model_dict[self.args.ae_model].Model(self.args, self.device).float()
+        model = (
+            self.model_dict[self.args.ae_model].Model(self.args, self.device).float()
+        )
+
+        if self.args.use_multi_gpu and self.args.use_gpu:
+            model = nn.DataParallel(model, device_ids=self.args.device_ids)
+        print(model)
         return model
 
     def _get_data(self, flag):
@@ -37,16 +46,28 @@ class Exp_AutoEncoder(Exp_Basic):
         return model_optim
 
     def _select_criterion(self):
-        criterion = nn.MSELoss() 
+        criterion = nn.MSELoss()
         return criterion
-    
-    # def loss_function(self, outputs, batch_x, mu, logvar):
-    #     recon_loss = F.mse_loss(outputs, batch_x, reduction='sum')
-    #     kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        
-    #     return recon_loss + 5*kl_loss
+
+    def inst_CL_hard(self, z1, z2):
+        B, T = z1.size(0), z1.size(1)
+        if B == 1:
+            return z1.new_tensor(0.0)
+        z = torch.cat([z1, z2], dim=0)  # 2B x T x C
+        z = z.transpose(0, 1)  # T x 2B x C
+        sim = torch.matmul(z, z.transpose(1, 2))  # T x 2B x 2B
+        logits = torch.tril(sim, diagonal=-1)[:, :, :-1]  # T x 2B x (2B-1)
+        logits += torch.triu(sim, diagonal=1)[:, :, 1:]
+        logits = -F.log_softmax(logits, dim=-1)
+
+        i = torch.arange(B, device=z1.device)
+        loss = (logits[:, i, B + i - 1].mean() + logits[:, B + i, i].mean()) / 2
+        return loss
 
     def vali(self, vali_data, vali_loader, criterion):
+        vali_loss = []
+        vali_loss_cl = []
+        vali_total_loss = []
         total_loss = []
         self.model.eval()
         with torch.no_grad():
@@ -55,6 +76,7 @@ class Exp_AutoEncoder(Exp_Basic):
             ):
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float()
+                mixed_batch_x = self.mix_batch(batch_x)
 
                 if "PEMS" in self.args.data or "Solar" in self.args.data:
                     batch_x_mark = None
@@ -92,22 +114,46 @@ class Exp_AutoEncoder(Exp_Basic):
                             batch_x, batch_x_mark, dec_inp, batch_y_mark
                         )[0]
                     else:
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark) # , mu, logvar
+                        # outputs, _, _ = self.model(
+                        #     batch_x, batch_x_mark, dec_inp, batch_y_mark
+                        # )
+                        enc_out = self.model.encode(batch_x)
+                        outputs = self.model.decode(enc_out)
+                        # real_rep = self.model.encode(batch_x)
+                        # outputs = self.model.decode(real_rep)
                 f_dim = -1 if self.args.features == "MS" else 0
                 outputs = outputs[:, -self.args.pred_len :, f_dim:]
 
-                # mu_cpu = mu.detach().cpu()
-                # logvar_cpu = logvar.detach().cpu()
                 pred = outputs.detach().cpu()
                 true = batch_x.detach().cpu()
 
-                # loss = self.loss_function(pred, true, mu_cpu, logvar_cpu)
                 loss = criterion(pred, true)
-                total_loss.append(loss)
+                # vali_loss.append(loss)
 
-        total_loss = np.average(total_loss)
+                ### CHANGED: for shuffled fake data
+                enc_out = self.model.encode(batch_x)
+                mixed_enc_out = self.model.encode(mixed_batch_x)
+                rep = enc_out.detach().cpu()
+                mixed_rep = mixed_enc_out.detach().cpu()
+
+                loss_cl = self.inst_CL_hard(rep, mixed_rep)
+
+                # TODO
+                alpha = 0.2
+                total_loss = (1 - alpha) * loss + alpha * loss_cl
+                total_loss = loss + loss_cl
+
+                loss_cl = self.inst_CL_hard(rep, mixed_rep)
+                # vali_loss_cl.append(loss_cl.item())
+
+                alpha = 0.2  # TODO
+                total_loss = (1 - alpha) * loss + alpha * loss_cl
+                vali_total_loss.append(total_loss)
+
+        # vali_loss = np.average(vali_loss)
+        vali_total_loss = np.average(vali_total_loss)
         self.model.train()
-        return total_loss
+        return vali_total_loss  # vali_loss
 
     def train(self, setting):
         train_data, train_loader = self._get_data(flag="train")
@@ -124,8 +170,17 @@ class Exp_AutoEncoder(Exp_Basic):
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
 
         model_optim = self._select_optimizer()
+        # CHANGED # TODO
+        scheduler = CosineLRScheduler(
+            model_optim,
+            t_initial=self.args.train_epochs,
+            cycle_limit=2,
+            lr_min=1e-4,  # 5e-5
+            warmup_t=self.args.train_epochs / 10,
+            warmup_lr_init=5e-4,  # 5e-5
+        )
+        #   wormup_prefix=True)
         criterion = self._select_criterion()
-        # criterion = self.loss_function()
 
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
@@ -148,8 +203,9 @@ class Exp_AutoEncoder(Exp_Basic):
 
         for epoch in range(self.args.train_epochs):
             iter_count = 0
+            train_mse_loss = []
+            train_cl_loss = []
             train_loss = []
-            # to_scaled_loss = []
 
             self.model.train()
             epoch_time = time.time()
@@ -159,8 +215,9 @@ class Exp_AutoEncoder(Exp_Basic):
                 iter_count += 1
                 model_optim.zero_grad()
                 batch_x = batch_x.float().to(self.device)
-
                 batch_y = batch_y.float().to(self.device)
+                mixed_batch_x = self.mix_batch(batch_x)
+
                 if "PEMS" in self.args.data or "Solar" in self.args.data:
                     batch_x_mark = None
                     batch_y_mark = None
@@ -188,31 +245,46 @@ class Exp_AutoEncoder(Exp_Basic):
                                 batch_x, batch_x_mark, dec_inp, batch_y_mark
                             )[0]
                         else:
-                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark) #, mu, logvar
+                            outputs = self.model(
+                                batch_x, batch_x_mark, dec_inp, batch_y_mark
+                            )
 
                         f_dim = -1 if self.args.features == "MS" else 0
                         outputs = outputs[:, -self.args.pred_len :, f_dim:]
-                        loss = self.loss_function(outputs, batch_x, mu, logvar)  # CHANGED
-                        train_loss.append(loss.item())
+                        loss = criterion(outputs, batch_x)  # CHANGED
+                        train_mse_loss.append(loss.item())
                 else:
                     if self.args.output_attention:
                         outputs = self.model(
                             batch_x, batch_x_mark, dec_inp, batch_y_mark
                         )[0]
                     else:
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark) # , mu, logvar 
+                        (outputs,) = self.model(
+                            batch_x, batch_x_mark, dec_inp, batch_y_mark
+                        )
+
                     f_dim = -1 if self.args.features == "MS" else 0
                     outputs = outputs[:, -self.args.pred_len :, f_dim:]
-                    # loss = self.loss_function(outputs, batch_x, mu, logvar)  # CHANGED
-                    loss = criterion(outputs, batch_x)
-                    # loss_to_scaled = criterion(rescaled_hat[:, :, 0], means) + criterion(rescaled_hat[:, :, 1], stdev)
-                    train_loss.append(loss.item())
-                    # to_scaled_loss.append(loss_to_scaled.item())
+                    loss = criterion(outputs, batch_x)  # CHANGED
+                    train_mse_loss.append(loss.item())
+
+                    ### CHANGED: for contrastive learning
+                    rep = self.model.encode(batch_x)
+                    mixed_rep = self.model.encode(mixed_batch_x)
+
+                    loss_cl = self.inst_CL_hard(rep, mixed_rep)
+                    train_cl_loss.append(loss_cl.item())
+
+                    # TODO
+                    alpha = 0.2
+                    total_loss = (1 - alpha) * loss + alpha * loss_cl
+                    total_loss = loss + loss_cl
+                    train_loss.append(total_loss.item())
 
                 if (i + 1) % 100 == 0:
                     print(
-                        "\titers: {0}, epoch: {1} | loss: {2:.7f}".format(
-                            i + 1, epoch + 1, loss.item()
+                        "\titers: {0}, epoch: {1} | loss_mse: {2:.7f} | loss_cl: {3:.7f} ".format(
+                            i + 1, epoch + 1, loss.item(), loss_cl.item()
                         )
                     )
                     speed = (time.time() - time_now) / iter_count
@@ -232,29 +304,32 @@ class Exp_AutoEncoder(Exp_Basic):
                     scaler.step(model_optim)
                     scaler.update()
                 else:
-                    loss.backward()
-                    # loss_to_scaled.backward()
+                    # loss.backward(retain_graph=True)
+                    total_loss.backward()  # CHANGED
                     model_optim.step()
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
+            # train_loss = np.average(train_loss)
             train_loss = np.average(train_loss)
-            # vali_loss = self.vali(vali_data, vali_loader, self.loss_function)
+            train_mse_loss = np.average(train_mse_loss)
+            train_cl_loss = np.average(train_cl_loss)
             vali_loss = self.vali(vali_data, vali_loader, criterion)
-            # test_loss = self.vali(test_data, test_loader, self.loss_function)
             test_loss = self.vali(test_data, test_loader, criterion)
 
             print(
-                "Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
+                "Epoch: {0}, Steps: {1} | Train Total Loss: {2:.7f} Vali Total Loss: {3:.7f} Test Loss: {4:.7f}".format(
                     epoch + 1, train_steps, train_loss, vali_loss, test_loss
                 )
-            )
+            )  # CHANGED
+            print(f"Train MSE Loss: {train_mse_loss} Train CL Loss: {train_cl_loss}")
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
                 break
 
-            adjust_learning_rate(model_optim, epoch + 1, self.args)
-
+            # adjust_learning_rate(model_optim, epoch + 1, self.args)
+            print(f"lr: {model_optim.param_groups[0]['lr']}")
+            scheduler.step(i + 1)
             # get_cka(self.args, setting, self.model, train_loader, self.device, epoch)
 
         best_model_path = path + "/" + "checkpoint.pth"
@@ -450,6 +525,40 @@ class Exp_AutoEncoder(Exp_Basic):
 
     #     return
 
+    def mix_batch(self, batch_x):
+        """
+        for contrastive learning
+        batch: (batch_size, seq_len, dim)
+        """
+        batch = batch_x.permute(0, 2, 1)
+        mixed_batch = torch.empty_like(batch)
+        batch_size, dim, _ = batch.shape
+        indices = (
+            torch.empty((batch_size, dim), device=self.device)
+            .random_(0, batch_size)
+            .long()
+        )
+        for i in range(batch_size):
+            batch_indices = torch.randint(0, batch_size, (dim,))
+            indices[i] = batch_indices
+        mixed_batch = batch[indices, torch.arange(dim)]
+        return mixed_batch.permute(0, 2, 1)
+
+        # mixed_rep = torch.empty_like(real_rep)
+        # indices = (
+        #     torch.empty(
+        #         (real_rep.shape[0], real_rep.shape[1]), device=self.device
+        #     )
+        #     .random_(0, real_rep.shape[0])
+        #     .long()
+        # )
+        # for i in range(real_rep.shape[0]):
+        #     batch_indices = torch.randint(
+        #         0, real_rep.shape[0], (real_rep.shape[1],)
+        #     )
+        #     indices[i] = batch_indices
+        # mixed_rep = real_rep[indices, torch.arange(real_rep.shape[1])]
+
     def save_recon_as_npy(self, setting, load=False):
         """
         generate trues and recons for evaluation
@@ -509,8 +618,9 @@ class Exp_AutoEncoder(Exp_Basic):
                             #     batch_x, batch_x_mark, dec_inp, batch_y_mark
                             # )[0]
                         else:  # CHANGED
-                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark) # , mu, logvar
-                    # enc_out = enc_out.detach().cpu().numpy()
+                            enc_out = self.model.encode(batch_x)
+                            outputs = self.model.decode(enc_out)
+                    enc_out = enc_out.detach().cpu().numpy()
                     outputs = outputs.detach().cpu().numpy()
                     batch_x = batch_x.detach().cpu().numpy()
                     if (train_data.scale or vali_data.scale) and self.args.inverse:
@@ -526,21 +636,21 @@ class Exp_AutoEncoder(Exp_Basic):
                             .inverse_transform(batch_x.squeeze(0))
                             .reshape(shape)
                         )
-                    # real_hidden = enc_out
+                    real_hidden = enc_out
                     recon = outputs
                     true = batch_x
 
-                    # real_hiddens.append(real_hidden)
+                    real_hiddens.append(real_hidden)
                     recons.append(recon)
                     trues.append(true)
 
-                # real_hiddens = np.array(real_hiddens)  # TODO
+                real_hiddens = np.array(real_hiddens)  # TODO
                 recons = np.array(recons)
                 trues = np.array(trues)
 
-                # real_hiddens = real_hiddens.reshape(
-                #     -1, real_hiddens.shape[-2], real_hiddens.shape[-1]
-                # )
+                real_hiddens = real_hiddens.reshape(
+                    -1, real_hiddens.shape[-2], real_hiddens.shape[-1]
+                )
                 recons = recons.reshape(-1, recons.shape[-2], recons.shape[-1])
                 trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
 
@@ -550,7 +660,7 @@ class Exp_AutoEncoder(Exp_Basic):
                     os.makedirs(folder_path)
 
                 flag_name = "train" if flag == 0 else "vali"
-                # np.save(folder_path + f"real_hiddens_{flag_name}.npy", real_hiddens)
+                np.save(folder_path + f"real_hiddens_{flag_name}.npy", real_hiddens)
                 np.save(folder_path + f"recons_{flag_name}.npy", recons)
                 np.save(folder_path + f"trues_{flag_name}.npy", trues)
 

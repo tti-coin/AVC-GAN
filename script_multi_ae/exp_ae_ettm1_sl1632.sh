@@ -1,0 +1,43 @@
+python run_ae.py \
+--is_ae_training 1 \
+--root_path ./data/iTransformer_datasets/ETT-small/ \
+--data_path ETTm1.csv \
+--model_id ae \
+--model iTransformer \
+--d_model 128 \
+--data ETTm1 \
+--features M \
+--seq_len 1632 \
+--pred_len 1632 \
+--e_layers 2 \
+--enc_in 7 \
+--dec_in 7 \
+--c_out 7 \
+--des ettm1 \
+--ae_batch_size 32 \
+--train_epochs 100 \
+--patience 10 \
+--learning_rate 0.001 \
+--wandb_notes "Experiments to non-conditioal AE predict 1632 steps"
+
+python run_ae.py \
+--is_ae_training 0 \
+--root_path ./data/iTransformer_datasets/ETT-small/ \
+--data_path ETTm1.csv \
+--model_id ae \
+--model iTransformer \
+--d_model 128 \
+--data ETTm1 \
+--features M \
+--seq_len 1632 \
+--pred_len 1632 \
+--e_layers 2 \
+--enc_in 7 \
+--dec_in 7 \
+--c_out 7 \
+--des ettm1 \
+--ae_batch_size 32 \
+--train_epochs 100 \
+--patience 10 \
+--learning_rate 0.001 \
+--wandb_notes "Experiments to non-conditioal AE predict 1632 steps"

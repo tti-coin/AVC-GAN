@@ -2,6 +2,7 @@ import math
 
 import torch
 import torch.nn as nn
+import pdb
 
 
 class PositionalEmbedding(nn.Module):
@@ -140,18 +141,23 @@ class DataEmbedding(nn.Module):
 
 
 class DataEmbedding_inverted(nn.Module):
-    def __init__(self, c_in, d_model, embed_type="fixed", freq="h", dropout=0.1):
+    def __init__(
+        self, seq_len, c_in, d_model, embed_type="fixed", freq="h", dropout=0.1
+    ):
         super(DataEmbedding_inverted, self).__init__()
-        self.value_embedding = nn.Linear(c_in, d_model)
+        self.value_embedding = nn.Linear(seq_len, d_model)
+        self.position_embedding = PositionalEmbedding(d_model=d_model)
+        # self.variate_emb = nn.Embedding(c_in, d_model)
+        # nn.init.normal_(self.variate_emb.weight, std=0.02)
+        
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, x, x_mark):
         x = x.permute(0, 2, 1)
         # x: [Batch Variate Time]
         if x_mark is None:
-            x = self.value_embedding(x)
+            x = self.value_embedding(x) + self.position_embedding(x) # CHANGED
         else:
             # the potential to take covariates (e.g. timestamps) as tokens
             x = self.value_embedding(torch.cat([x, x_mark.permute(0, 2, 1)], 1))
-        # x: [Batch Variate d_model]
         return self.dropout(x)

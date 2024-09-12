@@ -20,8 +20,6 @@ from torch.autograd import grad as torch_grad
 
 from data_provider.data_factory import data_provider
 from experiments.exp_basic import Exp_Basic
-
-# from model.gan import Discriminator, Generator  # SetDiscriminator
 from model.iTransformer import Model
 from utils.metrics import metric
 from utils.tools import EarlyStopping, adjust_learning_rate, visual
@@ -53,6 +51,12 @@ class Exp_iTransGAN(Exp_Basic):
         )
         return discriminator
 
+    def _build_set_discriminator(self):
+        set_discriminator = self.model_dict["ConditionalGAN"].SetDiscriminator(
+            self.args.enc_in, self.args.noise_dim, self.device
+        )
+        return set_discriminator
+
     def _get_data(self, flag):
         data_set, data_loader = data_provider(self.args, flag)
         return data_set, data_loader
@@ -73,15 +77,10 @@ class Exp_iTransGAN(Exp_Basic):
 
     def train_gan(self, ae_setting, gan_setting):
         self.model.load_state_dict(
-            torch.load(os.path.join("./checkpoints/", ae_setting, "checkpoint.pth"))
+            torch.load(
+                os.path.join("/workspace/checkpoints/", ae_setting, "checkpoint.pth")
+            )
         )
-
-        # self.model.load_state_dict(
-        #     torch.load(
-        #         "/workspace/checkpoints/masked_ae_ettm2_sl192_pl192_iTransformer_ETTm2_ftM_sl192_ll48_pl192_dm256_nh8_el2_dl1_df512_fc1_ebtimeF_vmr0.3_mr0.5_dtTrue_lr0.001_ettm2_projection_0/checkpoint.pth"
-        #     )
-        # )
-        # print("++++++ DEBUG ++++++")
         print("Loaded trained AutoEncoder")
 
         _, train_loader = self._get_data(flag="train")
@@ -128,31 +127,19 @@ class Exp_iTransGAN(Exp_Basic):
                     )
 
                     real_rep = self.model.encode(batch_x.float().to(self.device))
-
-                    # ### CHANGED: for shuffled fake data
-                    # mixed_rep = torch.empty_like(real_rep)
-                    # indices = (
-                    #     torch.empty(
-                    #         (real_rep.shape[0], real_rep.shape[1]), device=self.device
-                    #     )
-                    #     .random_(0, real_rep.shape[0])
-                    #     .long()
-                    # )
-                    # for i in range(real_rep.shape[0]):
-                    #     batch_indices = torch.randint(
-                    #         0, real_rep.shape[0], (real_rep.shape[1],)
-                    #     )
-                    #     indices[i] = batch_indices
-                    # mixed_rep = real_rep[indices, torch.arange(real_rep.shape[1])]
+                    mixed_rep = self.mix_batch(real_rep)
 
                     if self.args.use_hidden:
                         d_real = self.discriminator(real_rep)
-                        # d_set_real = self.set_discriminator(real_rep)
+                        d_real_set = self.set_discriminator(
+                            real_rep.reshape(real_rep.shape[0], -1)
+                        )
                     else:
-                        real_dec = self.model.decode(
-                            real_rep
-                        )  # real_dec: (batch_size, seq_len, N)
-                        d_real = self.discriminator(torch.permute(real_dec, (0, 2, 1)))
+                        assert NotImplementedError
+                        # real_dec = self.model.decode(
+                        #     real_rep
+                        # )  # real_dec: (batch_size, seq_len, N)
+                        # d_real = self.discriminator(torch.permute(real_dec, (0, 2, 1)))
 
                     # On fake data
                     with torch.no_grad():
@@ -161,13 +148,13 @@ class Exp_iTransGAN(Exp_Basic):
                     x_fake.requires_grad_()
                     if self.args.use_hidden:
                         d_fake = self.discriminator(x_fake)
-                        # d_fake_set = self.discriminator(
-                        #     mixed_rep.float().to(self.device)
-                        # )  # CHANGED
-                        # d_set_fake = self.set_discriminator(x_fake)
+                        d_fake_set = self.set_discriminator(
+                            mixed_rep.reshape(mixed_rep.shape[0], -1)
+                        )
                     else:
-                        fake_dec = self.model.decode(x_fake)
-                        d_fake = self.discriminator(torch.permute(fake_dec, (0, 2, 1)))
+                        assert NotImplementedError
+                        # fake_dec = self.model.decode(x_fake)
+                        # d_fake = self.discriminator(torch.permute(fake_dec, (0, 2, 1)))
 
                     # get gradient penalty
                     if self.args.use_hidden:
@@ -177,16 +164,17 @@ class Exp_iTransGAN(Exp_Basic):
                         #     x_fake.reshape(x_fake.shape[0], -1),
                         # )
                     else:
-                        gradient_penalty = self.grad_penalty(real_dec, fake_dec)
+                        assert NotImplementedError
+                        # gradient_penalty = self.grad_penalty(real_dec, fake_dec)
 
-                    # d_loss = d_fake.mean() + d_set_fake.mean() - d_real.mean() - d_set_real.mean() + gradient_penalty + set_gradient_penalty
-                    # d_loss = (
-                    #     d_fake.mean()
-                    #     # + d_fake_set.mean()
-                    #     - d_real.mean()
-                    #     + gradient_penalty
-                    # )
-                    d_loss = d_fake.mean() - d_real.mean() + gradient_penalty
+                    d_loss = (
+                        d_fake.mean()
+                        + d_fake_set.mean()
+                        - d_real.mean()
+                        - d_real_set.mean()
+                        + gradient_penalty
+                    )
+                    # d_loss = d_fake.mean() - d_real.mean() + gradient_penalty
                     d_loss.backward()
 
                     discriminator_optim.step()
@@ -236,7 +224,8 @@ class Exp_iTransGAN(Exp_Basic):
                     "train/loss/d_loss": avg_d_loss,
                     "train/loss/d_loss_real": d_real.mean(),
                     "train/loss/d_loss_fake": d_fake.mean(),
-                    # "train/loss/d_loss_fake_set": d_fake_set.mean(),
+                    "train/loss/d_loss_real_set": d_real_set.mean(),
+                    "train/loss/d_loss_fake_set": d_fake_set.mean(),
                     "train/loss/g_loss": g_loss.item(),
                     "train/loss/gradient_penalty": gradient_penalty.item(),
                 }
@@ -331,6 +320,24 @@ class Exp_iTransGAN(Exp_Basic):
             ),
         )
         print(f"Saved {iteration + 1}iter Conditional-WGAN")
+
+    def mix_batch(self, batch):
+        """
+        for contrastive learning
+        batch: (batch_size, dim, emb_dim)
+        """
+        mixed_batch = torch.empty_like(batch)
+        batch_size, dim, _ = batch.shape
+        indices = (
+            torch.empty((batch_size, dim), device=self.device)
+            .random_(0, batch_size)
+            .long()
+        )
+        for i in range(batch_size):
+            batch_indices = torch.randint(0, batch_size, (dim,))
+            indices[i] = batch_indices
+        mixed_batch = batch[indices, torch.arange(dim)]
+        return mixed_batch
 
     def save_hiddens_and_generated_as_npy(self, ae_setting, gan_setting):
         """

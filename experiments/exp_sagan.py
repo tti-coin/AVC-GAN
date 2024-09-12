@@ -29,9 +29,9 @@ from utils.tools import EarlyStopping, adjust_learning_rate, visual
 warnings.filterwarnings("ignore")
 
 
-class Exp_iTransGAN(Exp_Basic):
+class Exp_SAGAN(Exp_Basic):
     def __init__(self, args):
-        super(Exp_iTransGAN, self).__init__(args)
+        super(Exp_SAGAN, self).__init__(args)
 
     def _build_model(self):
         model = (
@@ -41,15 +41,18 @@ class Exp_iTransGAN(Exp_Basic):
 
     def _build_generator(self):
         generator = (
-            self.model_dict["ConditionalGAN"]
-            .Generator(self.args.enc_in, self.args.noise_dim, self.device)
+            self.model_dict[
+                self.args.gan_model
+            ]  # TODO: args.gan_model に変更, conditional sagan へ変更できるように
+            .Generator(self.args, self.device)
             .float()
         )
+        print(generator)
         return generator
 
     def _build_discriminator(self):
-        discriminator = self.model_dict["ConditionalGAN"].Discriminator(
-            self.args.enc_in, self.args.noise_dim, self.device
+        discriminator = self.model_dict[self.args.gan_model].Discriminator(
+            self.args, self.device
         )
         return discriminator
 
@@ -75,14 +78,11 @@ class Exp_iTransGAN(Exp_Basic):
         self.model.load_state_dict(
             torch.load(os.path.join("./checkpoints/", ae_setting, "checkpoint.pth"))
         )
-
+        print("Loaded trained AutoEncoder")
         # self.model.load_state_dict(
-        #     torch.load(
-        #         "/workspace/checkpoints/masked_ae_ettm2_sl192_pl192_iTransformer_ETTm2_ftM_sl192_ll48_pl192_dm256_nh8_el2_dl1_df512_fc1_ebtimeF_vmr0.3_mr0.5_dtTrue_lr0.001_ettm2_projection_0/checkpoint.pth"
-        #     )
+        #     torch.load("/workspace/checkpoints/ae_ettm2_sl192_pl192_iTransformer_ETTm2_ftM_sl192_ll48_pl192_dm128_nh8_el2_dl1_df2048_fc1_ebtimeF_dtTrue_ettm2_projection_0/checkpoint.pth")
         # )
         # print("++++++ DEBUG ++++++")
-        print("Loaded trained AutoEncoder")
 
         _, train_loader = self._get_data(flag="train")
 
@@ -123,35 +123,15 @@ class Exp_iTransGAN(Exp_Basic):
                     z = torch.randn(
                         self.args.gan_batch_size,
                         self.args.enc_in,
-                        self.args.noise_dim,
+                        self.args.d_model,
                         device=self.device,
                     )
 
                     real_rep = self.model.encode(batch_x.float().to(self.device))
-
-                    # ### CHANGED: for shuffled fake data
-                    # mixed_rep = torch.empty_like(real_rep)
-                    # indices = (
-                    #     torch.empty(
-                    #         (real_rep.shape[0], real_rep.shape[1]), device=self.device
-                    #     )
-                    #     .random_(0, real_rep.shape[0])
-                    #     .long()
-                    # )
-                    # for i in range(real_rep.shape[0]):
-                    #     batch_indices = torch.randint(
-                    #         0, real_rep.shape[0], (real_rep.shape[1],)
-                    #     )
-                    #     indices[i] = batch_indices
-                    # mixed_rep = real_rep[indices, torch.arange(real_rep.shape[1])]
-
                     if self.args.use_hidden:
                         d_real = self.discriminator(real_rep)
-                        # d_set_real = self.set_discriminator(real_rep)
                     else:
-                        real_dec = self.model.decode(
-                            real_rep
-                        )  # real_dec: (batch_size, seq_len, N)
+                        real_dec = self.model.decode(real_rep)
                         d_real = self.discriminator(torch.permute(real_dec, (0, 2, 1)))
 
                     # On fake data
@@ -161,10 +141,6 @@ class Exp_iTransGAN(Exp_Basic):
                     x_fake.requires_grad_()
                     if self.args.use_hidden:
                         d_fake = self.discriminator(x_fake)
-                        # d_fake_set = self.discriminator(
-                        #     mixed_rep.float().to(self.device)
-                        # )  # CHANGED
-                        # d_set_fake = self.set_discriminator(x_fake)
                     else:
                         fake_dec = self.model.decode(x_fake)
                         d_fake = self.discriminator(torch.permute(fake_dec, (0, 2, 1)))
@@ -172,20 +148,9 @@ class Exp_iTransGAN(Exp_Basic):
                     # get gradient penalty
                     if self.args.use_hidden:
                         gradient_penalty = self.grad_penalty(real_rep, x_fake)
-                        # set_gradient_penalty = self.grad_penalty(
-                        #     real_rep.reshape(real_rep.shape[0], -1),
-                        #     x_fake.reshape(x_fake.shape[0], -1),
-                        # )
                     else:
                         gradient_penalty = self.grad_penalty(real_dec, fake_dec)
 
-                    # d_loss = d_fake.mean() + d_set_fake.mean() - d_real.mean() - d_set_real.mean() + gradient_penalty + set_gradient_penalty
-                    # d_loss = (
-                    #     d_fake.mean()
-                    #     # + d_fake_set.mean()
-                    #     - d_real.mean()
-                    #     + gradient_penalty
-                    # )
                     d_loss = d_fake.mean() - d_real.mean() + gradient_penalty
                     d_loss.backward()
 
@@ -205,7 +170,7 @@ class Exp_iTransGAN(Exp_Basic):
             z = torch.randn(
                 self.args.gan_batch_size,
                 self.args.enc_in,
-                self.args.noise_dim,
+                self.args.d_model,
                 device=self.device,
             )
             fake = self.generator(z)

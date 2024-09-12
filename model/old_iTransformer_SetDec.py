@@ -1,13 +1,16 @@
+# from layers.Masked import Masking
+import pdb
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from layers.Compression import CompressionModel
 from layers.Embed import DataEmbedding_inverted
 from layers.SelfAttention_Family import AttentionLayer, FullAttention
 from layers.Transformer_EncDec import Encoder, EncoderLayer
-# from layers.Masked import Masking
-import pdb
+
 
 class Model(nn.Module):
     """
@@ -59,11 +62,18 @@ class Model(nn.Module):
             ],
             norm_layer=torch.nn.LayerNorm(configs.d_model),
         )
-        # print(self.encoder)
-        self.means_predictor = nn.Linear(configs.d_model, 1, bias=True)
-        self.stdev_predictor = nn.Linear(configs.d_model, 1, bias=True)
-
-        self.projector = nn.Linear(configs.d_model, configs.pred_len, bias=True)
+        self.compressor = CompressionModel(configs.d_model, configs.n_heads)
+        self.projector = nn.Sequential(
+            nn.Linear(configs.d_model, configs.pred_len * configs.enc_in, bias=True),
+            nn.Dropout(0.5),
+        )
+        # self.projector = nn.Sequential(
+        #     nn.Linear(configs.d_model, configs.pred_len * configs.enc_in),
+        #     nn.ReLU(),
+        #     nn.Linear(
+        #         configs.pred_len * configs.enc_in, configs.pred_len * configs.enc_in
+        #     ),
+        # )
 
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
         if self.use_norm:
@@ -74,47 +84,51 @@ class Model(nn.Module):
                 torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5
             )
             x_enc /= stdev
-        # NOTE: means.shape -> 32, 1, 7
+        # means.shape -> 32, 1, 7
         _, _, N = x_enc.shape
         # B: batch_size;    E: d_model;
         # L: seq_len;       S: pred_len;
         # N: number of variate (tokens), can also includes covariates
 
-        # Masking
+        # Masking # TODO
         num_vari_masked = int(self.enc_in * self.vari_masked_ratio)
         vari_masked = np.random.choice(self.enc_in, num_vari_masked, replace=False)
-        # vari_masked_sorted = np.sort(vari_masked)
-        # mask = torch.full((x_enc.size()), 1 - self.mask_ratio)
-        # masking = torch.bernoulli(mask).bool()
-        # masking = torch.bernoulli(torch.full(x_enc.size(), 1 - self.mask_ratio)).to(self.device)
-        # final_mask = torch.zeros_like(masking).bool()
         masked_x_enc = x_enc.clone()
+        total_mask = torch.ones_like(x_enc)
         for idx in vari_masked:
-            masking = torch.bernoulli(torch.full((1, x_enc.size(1)), 1 - self.mask_ratio)).to(self.device)
-            # final_mask[:, :, idx] = masking[:, :, idx]
+            masking = torch.bernoulli(
+                torch.full((1, x_enc.size(1)), 1 - self.mask_ratio)
+            ).to(self.device)
             masked_x_enc[:, :, idx] = x_enc[:, :, idx] * masking
-        # masked_x_enc = x_enc * masking
-        # masked_x_enc = x_enc * final_mask
+            masked_x_enc[:, :, idx] = masked_x_enc[:, :, idx].masked_fill(
+                masking == 0, -5
+            )  # TODO
+            total_mask[:, :, idx] = masking
+
+        # TODO: mask info の追加
+        x_mask = 1 - total_mask  # mask == 1
 
         # Embedding
         # B L N -> B N E                (B L N -> B L E in the vanilla Transformer)
+        # emb_out = self.enc_embedding(masked_x_enc, x_mask)
         emb_out = self.enc_embedding(masked_x_enc, None)
         # emb_out = self.enc_embedding(x_enc, None)
 
         # B N E -> B N E                (B L E -> B L E in the vanilla Transformer)
         # the dimensions of embedded time series has been inverted, and then processed by native attn, layernorm and ffn modules
-        # enc_out, attns = self.encoder(emb_out, attn_mask=None)
         enc_out, attns = self.encoder(emb_out, attn_mask=None)
         # enc_out.shape [32, 1, 512] (x_mark_enc=Noneとした場合)
 
-        # B N E -> B N S -> B S N
-        dec_out = self.projector(enc_out).permute(0, 2, 1)[
-            :, :, :N
-        ]  # filter the covariates
+        # Compression
+        # B N E -> B E
+        compressed_enc_out = self.compressor(enc_out)
 
-        # means_hat = self.means_predictor(emb_out).permute(0, 2, 1)
-        # stdev_hat = self.stdev_predictor(emb_out).permute(0, 2, 1)
-        # rescaled_hat = self.rescaled_predictor(emb_out)
+        # B N E -> B N S -> B S N
+        # dec_out = self.projector(enc_out).permute(0, 2, 1)[
+        #     :, :, :N
+        # ]  # filter the covariates
+        dec_out = self.projector(compressed_enc_out)
+        dec_out = dec_out.view(-1, self.pred_len, self.enc_in)
 
         if self.use_norm:
             # De-Normalization from Non-stationary Transformer
@@ -125,47 +139,29 @@ class Model(nn.Module):
                 means[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1)
             )
 
-            # ### CHANGEED ###
-            # dec_out = dec_out * (
-            #     stdev_hat[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1)
-            # )
-            # dec_out = dec_out + (
-            #     means_hat[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1)
-            # )
-        return dec_out # rescaled_hat # means_hat, stdev_hat
+        return dec_out
 
-    def encode(self, x_enc): # validation, test で使用？ # TODO:test の正規化
+    def encode(self, x_enc):  # validation, test で使用？ # TODO:test の正規化
         _, _, N = x_enc.shape
 
         # Embedding
         emb_out = self.enc_embedding(x_enc, None)
-        # mean_hat = self.means_predictor(emb_out).permute(0, 2, 1)
-        # stdev_hat = self.stdev_predictor(emb_out).permute(0, 2, 1)
-        # rescaled_hat = self.rescaled_predictor(emb_out)
 
         # the dimensions of embedded time series has been inverted, and then processed by native attn, layernorm and ffn modules
         enc_out, attns = self.encoder(emb_out, attn_mask=None)
 
-        return enc_out # rescaled_hat mean_hat, stdev_hat
+        return enc_out  # rescaled_hat mean_hat, stdev_hat
 
-    def decode(self, enc_out): # means_hat, stdev_hat  rescaled_hat
+    def decode(self, enc_out):  # means_hat, stdev_hat  rescaled_hat
         _, N, _ = enc_out.shape
         dec_out = self.projector(enc_out).permute(0, 2, 1)[
             :, :, :N
         ]  # filter the covariates
-        # means_hat = rescaled_hat[:, :, 0]
-        # stdev_hat = rescaled_hat[:, :, 1]
-        # CHANGED: re-scaled 
-        # if self.use_norm:
-        #     dec_out = dec_out * (
-        #         stdev_hat[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1)
-        #     )
-        #     dec_out = dec_out + (
-        #         means_hat[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1)
-        #     )
 
         return dec_out[:, -self.pred_len :, :]
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None):
-        dec_out = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec) # mean_hat, stdev_hat
-        return dec_out[:, -self.pred_len :, :], # rescaled_hat, mean_hat, stdev_hat
+        dec_out = self.forecast(
+            x_enc, x_mark_enc, x_dec, x_mark_dec
+        )  # mean_hat, stdev_hat
+        return dec_out[:, -self.pred_len :, :]
