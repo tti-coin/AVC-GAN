@@ -1,7 +1,3 @@
-"""
-CHANGED: function of grad_penalty, dataloader
-"""
-
 import os
 import pdb
 import time
@@ -20,7 +16,6 @@ from torch.autograd import grad as torch_grad
 
 from data_provider.data_factory import data_provider
 from experiments.exp_basic import Exp_Basic
-
 # from model.gan import Discriminator, Generator  # SetDiscriminator
 from model.iTransformer import Model
 from utils.metrics import metric
@@ -29,9 +24,9 @@ from utils.tools import EarlyStopping, adjust_learning_rate, visual
 warnings.filterwarnings("ignore")
 
 
-class Exp_SAGAN(Exp_Basic):
+class Exp_InceptionGAN(Exp_Basic):
     def __init__(self, args):
-        super(Exp_SAGAN, self).__init__(args)
+        super(Exp_InceptionGAN, self).__init__(args)
 
     def _build_model(self):
         model = (
@@ -41,18 +36,32 @@ class Exp_SAGAN(Exp_Basic):
 
     def _build_generator(self):
         generator = (
-            self.model_dict[self.args.gan_model]
+            self.model_dict[
+                self.args.gan_model
+            ]  # TODO: args.gan_model に変更, conditional sagan へ変更できるように
             .Generator(self.args, self.device)
             .float()
         )
         print(generator)
         return generator
 
-    def _build_discriminator(self):
-        discriminator = self.model_dict[self.args.gan_model].Discriminator(
-            self.args, self.device
+    # def _build_discriminator(self):
+    #     discriminator = self.model_dict[self.args.gan_model].Discriminator(
+    #         self.args, self.device
+    #     )
+    #     return discriminator
+    
+    # def _build_discriminator_dec(self):
+    #     discriminator_dec = self.model_dict[self.args.gan_model].Discriminator_Dec(
+    #         self.args, self.device
+    #     )
+    #     return discriminator_dec
+    
+    def _build_inception_discriminator(self):
+        inception_discriminator = self.model_dict[self.args.gan_model].InceptionDiscriminator(
+            self.args, self.model, self.device
         )
-        return discriminator
+        return inception_discriminator
 
     def _get_data(self, flag):
         data_set, data_loader = data_provider(self.args, flag)
@@ -118,28 +127,37 @@ class Exp_SAGAN(Exp_Basic):
                         batch_x, _, _, _ = next(dataloader_iter)
 
                     discriminator_optim.zero_grad()
-                    noise = torch.randn(
+                    z = torch.randn(
                         self.args.gan_batch_size,
                         self.args.enc_in,
                         self.args.d_model,
                         device=self.device,
                     )
 
-                    if self.args.ae_model == "iTransformer":
-                        z_real = self.model.encode(batch_x.float().to(self.device))
-                    elif self.args.ae_model == "iTransVAE":
-                        z_real = self.model.encode(batch_x.float().to(self.device))[0]
-                    d_real = self.discriminator(z_real)
+                    real_rep = self.model.encode(batch_x.float().to(self.device))
+                    if self.args.use_hidden:
+                        d_real = self.discriminator(real_rep)
+                    else:
+                        real_dec = self.model.decode(real_rep)
+                        d_real = self.discriminator(torch.permute(real_dec, (0, 2, 1)))
 
                     # On fake data
                     with torch.no_grad():
-                        z_fake = self.generator(noise)
+                        x_fake = self.generator(z)
 
-                    z_fake.requires_grad_()
-                    d_fake = self.discriminator(z_fake)
+                    x_fake.requires_grad_()
+                    if self.args.use_hidden:
+                        d_fake = self.discriminator(x_fake)
+                    else:
+                        fake_dec = self.model.decode(x_fake)
+                        d_fake = self.discriminator(torch.permute(fake_dec, (0, 2, 1)))
 
                     # get gradient penalty
-                    gradient_penalty = self.grad_penalty(z_real, z_fake)
+                    if self.args.use_hidden:
+                        gradient_penalty = self.grad_penalty(real_rep, x_fake)
+                    else:
+                        gradient_penalty = self.grad_penalty(real_dec, fake_dec)
+
                     d_loss = d_fake.mean() - d_real.mean() + gradient_penalty
                     d_loss.backward()
 
@@ -156,14 +174,19 @@ class Exp_SAGAN(Exp_Basic):
             self.generator.train()
             self.discriminator.train()
             generator_optim.zero_grad()
-            noise = torch.randn(
+            z = torch.randn(
                 self.args.gan_batch_size,
                 self.args.enc_in,
                 self.args.d_model,
                 device=self.device,
             )
-            fake = self.generator(noise)
-            g_loss = -self.discriminator(fake).mean()
+            fake = self.generator(z)
+
+            if self.args.use_hidden:
+                g_loss = -self.discriminator(fake).mean()
+            else:
+                fake_data = self.model.decode(fake)
+                g_loss = -self.discriminator(torch.permute(fake_data, (0, 2, 1))).mean()
             g_loss.backward()
             generator_optim.step()
 
@@ -185,6 +208,7 @@ class Exp_SAGAN(Exp_Basic):
                     "train/loss/d_loss": avg_d_loss,
                     "train/loss/d_loss_real": d_real.mean(),
                     "train/loss/d_loss_fake": d_fake.mean(),
+                    # "train/loss/d_loss_fake_set": d_fake_set.mean(),
                     "train/loss/g_loss": g_loss.item(),
                     "train/loss/gradient_penalty": gradient_penalty.item(),
                 }
@@ -246,8 +270,8 @@ class Exp_SAGAN(Exp_Basic):
             #                 d_real = self.discriminator(real_rep) # input representation to discriminator
             #                 dloss_real = -d_real.mean()
             #                 # loss of fake
-            #                 noise = torch.randn(self.args.gan_batch_size, self.params["d_model"]).to(self.device)
-            #                 fake = self.generator(noise)
+            #                 z = torch.randn(self.args.gan_batch_size, self.params["d_model"]).to(self.device)
+            #                 fake = self.generator(z)
             #                 d_fake = self.discriminator(fake)
             #                 dloss_fake = d_fake.mean()
             #                 # compute dev score
@@ -313,12 +337,12 @@ class Exp_SAGAN(Exp_Basic):
 
         # generate hidden states and save them
         with torch.no_grad():
-            noise = torch.randn(
+            z = torch.randn(
                 self.args.gan_batch_size, self.args.enc_in, self.args.d_model
             ).to(self.device)
-            z_fake = self.generator(noise)
-            hiddens = z_fake.detach().cpu().numpy()
-            dec_fake = self.model.decode(z_fake)
+            x_fake = self.generator(z)
+            hiddens = x_fake.detach().cpu().numpy()
+            dec_fake = self.model.decode(x_fake)
             generated = dec_fake.cpu().numpy()
 
         save_dir = os.path.join("./checkpoints/", ae_setting, gan_setting, "eval_gan/")
@@ -506,20 +530,20 @@ class Exp_SAGAN(Exp_Basic):
 
         def _gen(batch_size):
             with torch.no_grad():
-                noise = torch.randn(batch_size, self.args.enc_in, self.args.d_model).to(
+                z = torch.randn(batch_size, self.args.enc_in, self.args.d_model).to(
                     self.device
                 )
-                z_fake = self.generator(noise)  # shape(batch_size, 96)
-                # z_fake = torch.unsqueeze(z_fake, dim=1)
+                x_fake = self.generator(z)  # shape(batch_size, 96)
+                # x_fake = torch.unsqueeze(x_fake, dim=1)
 
                 # for anylysis
-                # z_fake = np.load('/home/user/workspace/not_outlier_oriandgen_hidden_val_jsai.npy')
-                # z_fake = np.expand_dims(z_fake, 1)
-                # z_fake = z_fake.astype(np.float32)
-                # z_fake = torch.from_numpy(z_fake).clone()
-                # z_fake = z_fake.to(self.device)
+                # x_fake = np.load('/home/user/workspace/not_outlier_oriandgen_hidden_val_jsai.npy')
+                # x_fake = np.expand_dims(x_fake, 1)
+                # x_fake = x_fake.astype(np.float32)
+                # x_fake = torch.from_numpy(x_fake).clone()
+                # x_fake = x_fake.to(self.device)
 
-                dec_out = self.model.decode(z_fake)
+                dec_out = self.model.decode(x_fake)
                 dynamics = dec_out[:, -self.args.pred_len :, :].squeeze().cpu().numpy()
 
             res = []
@@ -530,7 +554,7 @@ class Exp_SAGAN(Exp_Basic):
                 res.append(dyn)
 
                 # add hidden_state
-                # hidden.append(torch.squeeze(z_fake[i]).tolist())
+                # hidden.append(torch.squeeze(x_fake[i]).tolist())
             return res
 
         save_dir = os.path.join(
@@ -579,11 +603,11 @@ class Exp_SAGAN(Exp_Basic):
 
         def _gen(batch_size):
             with torch.no_grad():
-                noise = torch.randn(batch_size, self.args.enc_in, self.args.d_model).to(
+                z = torch.randn(batch_size, self.args.enc_in, self.args.d_model).to(
                     self.device
                 )
-                z_fake = self.generator(noise)
-                dec_out = self.model.decode(z_fake)
+                x_fake = self.generator(z)
+                dec_out = self.model.decode(x_fake)
                 dynamics = dec_out[:, -self.args.pred_len :, :].squeeze().cpu().numpy()
             res = []
             for i in range(batch_size):
@@ -614,30 +638,30 @@ class Exp_SAGAN(Exp_Basic):
             os.makedirs(save_dir)
         np.save(os.path.join(save_dir, "gen.npy"), np.array(data))
 
-    def grad_penalty(self, z_real, z_fake):  # TODO: set はどう扱う？
-        batch_size = z_real.size(0)
+    def grad_penalty(self, x_real, x_fake):
+        batch_size = x_real.size(0)
         gp_weight = 10
 
-        # x_real_cat = torch.cat([x_real, real_mean, real_log_var], dim=2)
-        # x_fake_cat = torch.cat([z_fake, fake_mean, fake_log_var], dim=2)
-
-        if z_real.dim() == 2:
+        if x_real.dim() == 2:
             alpha = torch.rand(batch_size, 1, device=self.device)
-        elif z_real.dim() == 3:
+        elif x_real.dim() == 3:
             alpha = torch.rand(batch_size, 1, 1, device=self.device)
-        alpha = alpha.expand_as(z_real)
+        alpha = alpha.expand_as(x_real)
 
-        interpolated = (alpha * z_real + (1 - alpha) * z_fake).requires_grad_(True)
-        # make mean and log_var interpolated
-
+        interpolated = (alpha * x_real + (1 - alpha) * x_fake).requires_grad_(True)
         # interpolated = Variable(interpolated, requires_grad=True)
 
         # Calculate probability of interpolated examples
-        prob_interpolated = self.discriminator(interpolated)
-        # if x_real.dim() == 2:
-        #     prob_interpolated = self.set_discriminator(interpolated)
-        # if x_real.dim() == 3:
-        #     prob_interpolated = self.discriminator(interpolated)
+        if self.args.use_hidden:
+            prob_interpolated = self.discriminator(interpolated)
+            # if x_real.dim() == 2:
+            #     prob_interpolated = self.set_discriminator(interpolated)
+            # if x_real.dim() == 3:
+            #     prob_interpolated = self.discriminator(interpolated)
+        else:
+            prob_interpolated = self.discriminator(
+                torch.permute(interpolated, (0, 2, 1))
+            )
 
         # Calculate gradients of probabilities with respect to examples
         # gradients = torch_grad(

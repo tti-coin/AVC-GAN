@@ -10,6 +10,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import wandb
 from sklearn.manifold import TSNE
+
+# from torch.optim import lr_scheduler
+from timm.scheduler import CosineLRScheduler
 from torch import optim
 
 from data_provider.data_factory import data_provider
@@ -20,12 +23,18 @@ from utils.tools import EarlyStopping, adjust_learning_rate, visual
 warnings.filterwarnings("ignore")
 
 
-class Exp_AutoEncoder(Exp_Basic):
+class Exp_CLAE(Exp_Basic):
     def __init__(self, args):
-        super(Exp_AutoEncoder, self).__init__(args)
+        super(Exp_CLAE, self).__init__(args)
 
     def _build_model(self):
-        model = self.model_dict[self.args.ae_model].Model(self.args, self.device).float()
+        model = (
+            self.model_dict[self.args.ae_model].Model(self.args, self.device).float()
+        )
+
+        if self.args.use_multi_gpu and self.args.use_gpu:
+            model = nn.DataParallel(model, device_ids=self.args.device_ids)
+        print(model)
         return model
 
     def _get_data(self, flag):
@@ -37,16 +46,100 @@ class Exp_AutoEncoder(Exp_Basic):
         return model_optim
 
     def _select_criterion(self):
-        criterion = nn.MSELoss() 
+        criterion = nn.MSELoss()
         return criterion
-    
-    # def loss_function(self, outputs, batch_x, mu, logvar):
-    #     recon_loss = F.mse_loss(outputs, batch_x, reduction='sum')
-    #     kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+
+    # def inst_CL_hard(self, z1, z2):
+    #     B, T = z1.size(0), z1.size(1)
+    #     if B == 1:
+    #         return z1.new_tensor(0.0)
+    #     z = torch.cat([z1, z2], dim=0)  # 2B x T x C
+    #     z = z.transpose(0, 1)  # T x 2B x C
+    #     sim = torch.matmul(z, z.transpose(1, 2))  # T x 2B x 2B
+    #     logits = torch.tril(sim, diagonal=-1)[:, :, :-1]  # T x 2B x (2B-1)
+    #     logits += torch.triu(sim, diagonal=1)[:, :, 1:]
+    #     logits = -F.log_softmax(logits, dim=-1)
+
+    #     i = torch.arange(B, device=z1.device)
+    #     loss = (logits[:, i, B + i - 1].mean() + logits[:, B + i, i].mean()) / 2
+    #     return loss
+
+    # def channel_contrastive_loss(self, z):
+    #     B, C, E = z.size()  # B: バッチサイズ, C: チャネル数, E: 埋め込み次元
         
-    #     return recon_loss + 5*kl_loss
+    #     # 1. 同じインスタンス内の異なるチャネル間の類似度計算（正例）
+    #     z_norm = F.normalize(z, dim=-1)  # 埋め込み次元で正規化
+    #     # z_norm = z
+    #     pos_sim = torch.matmul(z_norm, z_norm.transpose(1, 2))  # B x C x C でチャネル間の類似度行列を計算
+        
+    #     # 2. 異なるインスタンス間の類似度計算（負例）
+    #     z_flat = z_norm.view(B * C, E)  # バッチとチャネルをフラット化して B*C x E
+    #     neg_sim = torch.matmul(z_flat, z_flat.T)  # (B*C) x (B*C) の類似度行列を計算
+    #     neg_sim = neg_sim.view(B, C, B, C)  # B x C x B x C にリシェイプ
+        
+    #     # 対角成分（同じインスタンス内のチャネル同士）を除外
+    #     neg_sim = neg_sim.masked_fill(torch.eye(B, device=z.device).view(B, 1, B, 1).bool(), -1e9)
+        
+    #     # 3. 損失計算
+    #     # 正例：同じインスタンス内の異なるチャネルの類似度の平均
+    #     pos_loss = -torch.log(torch.diagonal(pos_sim, offset=1).mean() + 1e-8)
+        
+    #     # 負例：異なるインスタンス間のチャネルの類似度に対する負の対数尤度
+    #     neg_loss = -F.log_softmax(neg_sim, dim=-1).mean()
+        
+    #     # 4. 正例と負例の損失を合算
+    #     loss = pos_loss + neg_loss
+    #     return loss
+
+    # def channel_contrastive_loss(self, z, z_shuffled):
+    #     B, C, E = z.size()  # B: バッチサイズ, C: チャネル数, E: 埋め込み次元
+        
+    #     # 1. データをシャッフルして負例を準備
+    #     # z_shuffled = z[torch.randperm(B)]  # シャッフルしたバッチデータ
+        
+    #     # 2. 元データとシャッフルデータを結合
+    #     z_combined = torch.cat([z, z_shuffled], dim=0)  # 2B x C x E
+        
+    #     # 3. 正例と負例の類似度計算
+    #     z_norm = F.normalize(z_combined, dim=-1)  # 埋め込み次元で正規化
+    #     sim = torch.matmul(z_norm, z_norm.transpose(1, 2))  # 2B x C x C の類似度行列を計算
+        
+    #     # 4. 正例（同じインスタンス内のチャネル同士）と負例（異なるインスタンスのチャネル同士）を分ける
+    #     pos_sim = sim[:B, :B, :B].mean()  # 同じインスタンス内の正例
+    #     neg_sim = sim[B:, :, :].mean()  # 異なるインスタンス間の負例
+
+    #     # 5. 損失計算
+    #     # 正例と負例の損失を計算
+    #     pos_loss = -torch.log(pos_sim + 1e-8)  # 正例の損失
+    #     neg_loss = -F.log_softmax(neg_sim, dim=-1).mean()  # 負例の損失
+
+    #     # 6. 正例と負例の損失を合算
+    #     loss = pos_loss + neg_loss
+    #     return loss
+
+    def channel_contrastive_loss(self, z, z_shuffled):
+        B, C, D = z.size()
+        # z_norm = F.normalize(z, dim=-1)
+        # z_shuffled_norm = F.normalize(z_shuffled, dim=-1)
+        z_combined = torch.cat([z, z_shuffled], dim=0)
+        z_norm = F.normalize(z_combined, dim=-1)
+
+        sim_matrix = torch.matmul(z_norm[:B], z_norm[B:].transpose(1, 2))
+
+        pos_sim = torch.diagonal(sim_matrix, dim1=1, dim2=2)
+        neg_sim = sim_matrix.masked_fill(torch.eye(C, device=z.device).bool(), -1e9)
+
+        pos_loss = -torch.log(pos_sim + 1e-8).mean()
+        neg_loss = -F.log_softmax(neg_sim, dim=-1).mean()
+
+        loss = pos_loss + neg_loss
+
+        return loss
 
     def vali(self, vali_data, vali_loader, criterion):
+        vali_loss = []
+        vali_loss_cl = []
+        vali_total_loss = []
         total_loss = []
         self.model.eval()
         with torch.no_grad():
@@ -92,22 +185,39 @@ class Exp_AutoEncoder(Exp_Basic):
                             batch_x, batch_x_mark, dec_inp, batch_y_mark
                         )[0]
                     else:
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark) # , mu, logvar
+                        # outputs, _, _ = self.model(
+                        #     batch_x, batch_x_mark, dec_inp, batch_y_mark
+                        # )
+                        enc_out = self.model.encode(batch_x)
+                        outputs = self.model.decode(enc_out)
+                        # real_rep = self.model.encode(batch_x)
+                        # outputs = self.model.decode(real_rep)
                 f_dim = -1 if self.args.features == "MS" else 0
                 outputs = outputs[:, -self.args.pred_len :, f_dim:]
 
-                # mu_cpu = mu.detach().cpu()
-                # logvar_cpu = logvar.detach().cpu()
                 pred = outputs.detach().cpu()
                 true = batch_x.detach().cpu()
 
-                # loss = self.loss_function(pred, true, mu_cpu, logvar_cpu)
                 loss = criterion(pred, true)
-                total_loss.append(loss)
+                # vali_loss.append(loss)
 
-        total_loss = np.average(total_loss)
+                ### CHANGED: for shuffled fake data
+                enc_out = self.model.encode(batch_x)
+                mixed_enc_out = self.mix_batch(enc_out)
+                rep = enc_out.detach().cpu()
+                mixed_rep = mixed_enc_out.detach().cpu()
+
+                loss_cl = self.channel_contrastive_loss(rep, mixed_rep)
+
+                # alpha = 0.2  # TODO
+                # total_loss = (1 - alpha) * loss + alpha * loss_cl
+                total_loss = loss + loss_cl
+                vali_total_loss.append(total_loss)
+
+        # vali_loss = np.average(vali_loss)
+        vali_total_loss = np.average(vali_total_loss)
         self.model.train()
-        return total_loss
+        return vali_total_loss  # vali_loss
 
     def train(self, setting):
         train_data, train_loader = self._get_data(flag="train")
@@ -124,8 +234,17 @@ class Exp_AutoEncoder(Exp_Basic):
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
 
         model_optim = self._select_optimizer()
+        # CHANGED # TODO
+        scheduler = CosineLRScheduler(
+            model_optim,
+            t_initial=self.args.train_epochs,
+            cycle_limit=2,
+            lr_min=1e-4,  # 5e-5
+            warmup_t=self.args.train_epochs / 10,
+            warmup_lr_init=5e-4,  # 5e-5
+        )
+        #   wormup_prefix=True)
         criterion = self._select_criterion()
-        # criterion = self.loss_function()
 
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
@@ -148,8 +267,9 @@ class Exp_AutoEncoder(Exp_Basic):
 
         for epoch in range(self.args.train_epochs):
             iter_count = 0
+            train_mse_loss = []
+            train_cl_loss = []
             train_loss = []
-            # to_scaled_loss = []
 
             self.model.train()
             epoch_time = time.time()
@@ -159,8 +279,8 @@ class Exp_AutoEncoder(Exp_Basic):
                 iter_count += 1
                 model_optim.zero_grad()
                 batch_x = batch_x.float().to(self.device)
-
                 batch_y = batch_y.float().to(self.device)
+
                 if "PEMS" in self.args.data or "Solar" in self.args.data:
                     batch_x_mark = None
                     batch_y_mark = None
@@ -188,31 +308,46 @@ class Exp_AutoEncoder(Exp_Basic):
                                 batch_x, batch_x_mark, dec_inp, batch_y_mark
                             )[0]
                         else:
-                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark) #, mu, logvar
+                            outputs = self.model(
+                                batch_x, batch_x_mark, dec_inp, batch_y_mark
+                            )
 
                         f_dim = -1 if self.args.features == "MS" else 0
                         outputs = outputs[:, -self.args.pred_len :, f_dim:]
-                        loss = self.loss_function(outputs, batch_x, mu, logvar)  # CHANGED
-                        train_loss.append(loss.item())
+                        loss = criterion(outputs, batch_x)  # CHANGED
+                        train_mse_loss.append(loss.item())
                 else:
                     if self.args.output_attention:
                         outputs = self.model(
                             batch_x, batch_x_mark, dec_inp, batch_y_mark
                         )[0]
                     else:
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark) # , mu, logvar 
+                        outputs = self.model(
+                            batch_x, batch_x_mark, dec_inp, batch_y_mark
+                        )
+
                     f_dim = -1 if self.args.features == "MS" else 0
                     outputs = outputs[:, -self.args.pred_len :, f_dim:]
-                    # loss = self.loss_function(outputs, batch_x, mu, logvar)  # CHANGED
-                    loss = criterion(outputs, batch_x)
-                    # loss_to_scaled = criterion(rescaled_hat[:, :, 0], means) + criterion(rescaled_hat[:, :, 1], stdev)
-                    train_loss.append(loss.item())
-                    # to_scaled_loss.append(loss_to_scaled.item())
+                    loss = criterion(outputs, batch_x)  # CHANGED
+                    train_mse_loss.append(loss.item())
+
+                    ### CHANGED: for contrastive learning
+                    rep = self.model.encode(batch_x)
+                    mixed_rep = self.mix_batch(rep)
+
+                    loss_cl = self.channel_contrastive_loss(rep, mixed_rep)
+                    train_cl_loss.append(loss_cl.item())
+
+                    # TODO
+                    # alpha = 0.2
+                    # total_loss = (1 - alpha) * loss + alpha * loss_cl
+                    total_loss = loss + loss_cl
+                    train_loss.append(total_loss.item())
 
                 if (i + 1) % 100 == 0:
                     print(
-                        "\titers: {0}, epoch: {1} | loss: {2:.7f}".format(
-                            i + 1, epoch + 1, loss.item()
+                        "\titers: {0}, epoch: {1} | loss_mse: {2:.7f} | loss_cl: {3:.7f} ".format(
+                            i + 1, epoch + 1, loss.item(), loss_cl.item()
                         )
                     )
                     speed = (time.time() - time_now) / iter_count
@@ -232,29 +367,32 @@ class Exp_AutoEncoder(Exp_Basic):
                     scaler.step(model_optim)
                     scaler.update()
                 else:
-                    loss.backward()
-                    # loss_to_scaled.backward()
+                    # loss.backward(retain_graph=True)
+                    total_loss.backward()  # CHANGED
                     model_optim.step()
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
+            # train_loss = np.average(train_loss)
             train_loss = np.average(train_loss)
-            # vali_loss = self.vali(vali_data, vali_loader, self.loss_function)
+            train_mse_loss = np.average(train_mse_loss)
+            train_cl_loss = np.average(train_cl_loss)
             vali_loss = self.vali(vali_data, vali_loader, criterion)
-            # test_loss = self.vali(test_data, test_loader, self.loss_function)
             test_loss = self.vali(test_data, test_loader, criterion)
 
             print(
-                "Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
+                "Epoch: {0}, Steps: {1} | Train Total Loss: {2:.7f} Vali Total Loss: {3:.7f} Test Loss: {4:.7f}".format(
                     epoch + 1, train_steps, train_loss, vali_loss, test_loss
                 )
-            )
+            )  # CHANGED
+            print(f"Train MSE Loss: {train_mse_loss} Train CL Loss: {train_cl_loss}")
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
                 break
 
-            adjust_learning_rate(model_optim, epoch + 1, self.args)
-
+            # adjust_learning_rate(model_optim, epoch + 1, self.args)
+            print(f"lr: {model_optim.param_groups[0]['lr']}")
+            scheduler.step(i + 1)
             # get_cka(self.args, setting, self.model, train_loader, self.device, epoch)
 
         best_model_path = path + "/" + "checkpoint.pth"
@@ -323,8 +461,8 @@ class Exp_AutoEncoder(Exp_Basic):
                         # outputs = self.model(
                         #     batch_x, batch_x_mark, dec_inp, batch_y_mark
                         # ) # TODO
-                        enc_out = self.model.encode(batch_x)
-                        outputs = self.model.decode(enc_out)
+                        enc_out = self.model.encode(batch_x)  # means_hat, stdev_hat
+                        outputs = self.model.decode(enc_out)  # means_hat, stdev_hat
 
                 f_dim = -1 if self.args.features == "MS" else 0
                 outputs = outputs[:, -self.args.pred_len :, f_dim:]
@@ -450,6 +588,40 @@ class Exp_AutoEncoder(Exp_Basic):
 
     #     return
 
+    def mix_batch(self, batch_x):
+        """
+        for contrastive learning
+        batch: (batch_size, seq_len, dim)
+        """
+        batch = batch_x.permute(0, 2, 1)
+        mixed_batch = torch.empty_like(batch)
+        batch_size, dim, _ = batch.shape
+        indices = (
+            torch.empty((batch_size, dim), device=self.device)
+            .random_(0, batch_size)
+            .long()
+        )
+        for i in range(batch_size):
+            batch_indices = torch.randint(0, batch_size, (dim,))
+            indices[i] = batch_indices
+        mixed_batch = batch[indices, torch.arange(dim)]
+        return mixed_batch.permute(0, 2, 1)
+
+        # mixed_rep = torch.empty_like(real_rep)
+        # indices = (
+        #     torch.empty(
+        #         (real_rep.shape[0], real_rep.shape[1]), device=self.device
+        #     )
+        #     .random_(0, real_rep.shape[0])
+        #     .long()
+        # )
+        # for i in range(real_rep.shape[0]):
+        #     batch_indices = torch.randint(
+        #         0, real_rep.shape[0], (real_rep.shape[1],)
+        #     )
+        #     indices[i] = batch_indices
+        # mixed_rep = real_rep[indices, torch.arange(real_rep.shape[1])]
+
     def save_recon_as_npy(self, setting, load=False):
         """
         generate trues and recons for evaluation
@@ -511,7 +683,6 @@ class Exp_AutoEncoder(Exp_Basic):
                         else:  # CHANGED
                             enc_out = self.model.encode(batch_x)
                             outputs = self.model.decode(enc_out)
-                            # outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark) # , mu, logvar
                     enc_out = enc_out.detach().cpu().numpy()
                     outputs = outputs.detach().cpu().numpy()
                     batch_x = batch_x.detach().cpu().numpy()

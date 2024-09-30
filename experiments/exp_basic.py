@@ -3,9 +3,13 @@ import os
 import torch
 
 from model import (
+    # InceptionGAN,
     iTransformer,
+    iTransVAE,
     SAGAN,
     ConditionalSAGAN,
+    ProjGAN,
+    SelfAttnGAN
 )
 
 
@@ -14,8 +18,11 @@ class Exp_Basic(object):
         self.args = args
         self.model_dict = {
             "iTransformer": iTransformer,
+            "iTransVAE": iTransVAE,
             "SAGAN": SAGAN,
             "ConditionalSAGAN": ConditionalSAGAN,
+            "ProjGAN": ProjGAN,
+            "SelfAttnGAN": SelfAttnGAN,
         }
         self.device = self._acquire_device()
         self.model = self._build_model().to(self.device)

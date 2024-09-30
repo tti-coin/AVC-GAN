@@ -2,52 +2,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-# from stock_energy.basic import PositionwiseFeedForward
-
-# class Generator(nn.Module):
-#     def __init__(self, c_in, d_model, device):
-#         super(Generator, self).__init__()
-#         self.c_in = c_in
-#         self.device = device
-#         # self.network = nn.Sequential(
-#         #     nn.Linear(d_model, 2 * d_model),
-#         #     nn.ReLU(True),
-#         #     nn.Linear(2 * d_model, 4 * d_model),
-#         #     nn.ReLU(True),
-#         #     nn.Linear(4 * d_model, 2 * d_model),
-#         #     nn.ReLU(True),
-#         #     nn.Linear(2 * d_model, d_model),
-#         # )
-
-
-#     def forward(self, noise):
-#         rep = self.network(noise)
-#         return rep
-
-
-# class Discriminator(nn.Module):
-#     def __init__(self, c_in, d_model, device):
-#         super(Discriminator, self).__init__()
-#         self.c_in = c_in
-#         self.device = device
-
-#         # v3 network
-#         self.network = nn.Sequential(
-#             nn.Linear(d_model, 2 * d_model),
-#             nn.LeakyReLU(0.2),
-#             nn.Linear(2 * d_model, 4 * d_model),
-#             nn.LeakyReLU(0.2),
-#             nn.Linear((4 * d_model), 2 * d_model),
-#             nn.LeakyReLU(0.2),
-#             nn.Linear(2 * d_model, 1),
-#         )
-
-#     def forward(self, rep):  # x.shape = (batch_size, d_model)
-#         validity = self.network(rep)
-#         return validity
-
-
-############################################################################################################
 class Generator(nn.Module):
     def __init__(self, args):
         super(Generator, self).__init__()
