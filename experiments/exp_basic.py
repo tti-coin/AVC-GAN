@@ -1,16 +1,9 @@
 import os
+import pdb
 
 import torch
 
-from model import (
-    # InceptionGAN,
-    iTransformer,
-    iTransVAE,
-    SAGAN,
-    ConditionalSAGAN,
-    ProjGAN,
-    SelfAttnGAN
-)
+from model import SAGAN, ConditionalSAGAN, iTransformer
 
 
 class Exp_Basic(object):
@@ -18,15 +11,12 @@ class Exp_Basic(object):
         self.args = args
         self.model_dict = {
             "iTransformer": iTransformer,
-            "iTransVAE": iTransVAE,
             "SAGAN": SAGAN,
             "ConditionalSAGAN": ConditionalSAGAN,
-            "ProjGAN": ProjGAN,
-            "SelfAttnGAN": SelfAttnGAN,
         }
         self.device = self._acquire_device()
         self.model = self._build_model().to(self.device)
-        if args.exp_name == "gan":
+        if args.exp_name == "GAN":
             self.generator = self._build_generator().to(self.device)
             self.discriminator = self._build_discriminator().to(self.device)
 

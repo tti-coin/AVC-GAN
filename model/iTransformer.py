@@ -24,8 +24,6 @@ class Model(nn.Module):
         self.output_attention = configs.output_attention
         self.use_norm = configs.use_norm
         self.enc_in = configs.enc_in  # Added
-        self.mask_ratio = configs.mask_ratio
-        self.vari_masked_ratio = configs.vari_masked_ratio
 
         # Embedding
         self.enc_embedding = DataEmbedding_inverted(
@@ -79,29 +77,9 @@ class Model(nn.Module):
         # L: seq_len;       S: pred_len;
         # N: number of variate (tokens), can also includes covariates
 
-        # Masking
-        num_vari_masked = int(self.enc_in * self.vari_masked_ratio)
-        vari_masked = np.random.choice(self.enc_in, num_vari_masked, replace=False)
-        masked_x_enc = x_enc.clone()
-        total_mask = torch.ones_like(x_enc)
-        for idx in vari_masked:
-            masking = torch.bernoulli(
-                torch.full((1, x_enc.size(1)), 1 - self.mask_ratio)
-            ).to(self.device)
-            masked_x_enc[:, :, idx] = x_enc[:, :, idx] * masking
-            masked_x_enc[:, :, idx] = masked_x_enc[:, :, idx].masked_fill(
-                masking == 0, -5
-            )  # TODO
-            total_mask[:, :, idx] = masking
-
-        # TODO: mask info の追加
-        x_mask = 1 - total_mask  # mask == 1
-
         # Embedding
         # B L N -> B N E                (B L N -> B L E in the vanilla Transformer)
-        emb_out = self.enc_embedding(masked_x_enc, None)
-        # emb_out = self.enc_embedding(masked_x_enc, None)
-        # emb_out = self.enc_embedding(x_enc, None)
+        emb_out = self.enc_embedding(x_enc, None)
 
         # B N E -> B N E                (B L E -> B L E in the vanilla Transformer)
         # the dimensions of embedded time series has been inverted, and then processed by native attn, layernorm and ffn modules

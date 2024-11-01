@@ -1,3 +1,7 @@
+"""
+CHANGED: function of grad_penalty, dataloader
+"""
+
 import os
 import pdb
 import time
@@ -16,10 +20,9 @@ from torch.autograd import grad as torch_grad
 
 from data_provider.data_factory import data_provider
 from experiments.exp_basic import Exp_Basic
-from model.iTransformer import Model
 
-# from model.gan import Discriminator, Generator
-from model.SAGAN import Discriminator, Generator
+# from model.gan import Discriminator, Generator  # SetDiscriminator
+from model.iTransformer import Model
 from utils.metrics import metric
 from utils.tools import EarlyStopping, adjust_learning_rate, visual
 
@@ -31,63 +34,74 @@ class Exp_SAGAN(Exp_Basic):
         super(Exp_SAGAN, self).__init__(args)
 
     def _build_model(self):
-        model = self.model_dict["SAGAN"].Model(self.args)
+        model = (
+            self.model_dict[self.args.ae_model].Model(self.args, self.device).float()
+        )
         return model
 
     def _build_generator(self):
-        generator = self.model_dict["SAGAN"].Generator(self.args)
+        generator = (
+            self.model_dict[self.args.gan_model]
+            .Generator(self.args, self.device)
+            .float()
+        )
+        print(generator)
         return generator
 
     def _build_discriminator(self):
-        discriminator = self.model_dict["SAGAN"].Discriminator(self.args)
+        discriminator = self.model_dict[self.args.gan_model].Discriminator(
+            self.args, self.device
+        )
         return discriminator
-
-    def _select_optimizer(self):
-        generator_optm = torch.optim.RMSprop(
-            params=self.generator.parameters(),
-            lr=self.args.disc_lr,
-            alpha=self.args.gan_alpha,
-        )
-        discriminator_optm = torch.optim.RMSprop(
-            params=self.discriminator.parameters(),
-            lr=self.args.gen_lr,
-            alpha=self.args.gan_alpha,
-        )
-        return generator_optm, discriminator_optm
 
     def _get_data(self, flag):
         data_set, data_loader = data_provider(self.args, flag)
         return data_set, data_loader
 
-    def load_ae(self, setting):
-        self.ae.load_state_dict(torch.load(os.path.join("./checkpoints/" + setting, "checkpoint.pth")))
+    def _select_optimizer(self):
+        model_optim = optim.Adam(self.model.parameters(), lr=self.args.learning_rate)
+        generator_optim = torch.optim.RMSprop(
+            params=self.generator.parameters(),
+            lr=self.args.disc_lr,
+            alpha=self.args.gan_alpha,
+        )
+        discriminator_optim = torch.optim.RMSprop(
+            params=self.discriminator.parameters(),
+            lr=self.args.gen_lr,
+            alpha=self.args.gan_alpha,
+        )
+        return model_optim, generator_optim, discriminator_optim
 
-    def load_generator(self, pretrained_dir=None):
-        if pretrained_dir is not None:
-            path = pretrained_dir
-        else:
-            path = "{}/generator.dat".format(self.params["root_dir"])
-        self.logger.info("load: " + path)
-        self.generator.load_state_dict(torch.load(path, map_location=self.device))
+    def train_gan(self, ae_setting, gan_setting):
+        self.model.load_state_dict(
+            torch.load(
+                os.path.join("/workspace/checkpoints/", ae_setting, "checkpoint.pth")
+            )
+        )
+        print("Loaded trained AutoEncoder")
 
-    def train_gan(self, gan_setting):
         _, train_loader = self._get_data(flag="train")
+        dataloader_iter = iter(train_loader)
 
-        self.discriminator.train()
         self.generator.train()
+        self.discriminator.train()
+        self.model.eval()
 
-        generator_optm, discriminator_optm = self._select_optimizer()
+        _, generator_optim, discriminator_optim = self._select_optimizer()
 
-        save_dir = os.path.join("/workspace/checkpoints2/", gan_setting)
+        save_dir = os.path.join("/workspace/checkpoints/", ae_setting, gan_setting)
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
         gan_iter = self.args.gan_iter
         d_update = self.args.d_update
+        accumulate_steps = self.args.accumulate_steps
+
+        initial_noise = None
 
         for iteration in range(gan_iter):
-            dataloader_iter = iter(train_loader)
             avg_d_loss = 0
+            avg_d_set_loss = 0
             t1 = time.time()
 
             toggle_grad(self.generator, False)
@@ -104,44 +118,68 @@ class Exp_SAGAN(Exp_Basic):
                         dataloader_iter = iter(train_loader)
                         batch_x, _, _, _ = next(dataloader_iter)
 
-                    discriminator_optm.zero_grad()
-                    z = torch.randn(self.args.gan_batch_size, self.args.noise_dim, 1).to(self.device)
+                    # discriminator_optim.zero_grad()
 
-                    d_real = self.discriminator(batch_x.float().to(self.device))
+                    if initial_noise is None:
+                        initial_noise = torch.randn(
+                            self.args.gan_batch_size,
+                            self.args.enc_in,
+                            self.args.d_model,
+                            device=self.device,
+                        )
+                        noise = initial_noise
+                    else:
+                        noise = torch.randn_like(initial_noise)
+
+                    if self.args.ae_model == "iTransformer":
+                        z_real = self.model.encode(batch_x.float().to(self.device))
+                    elif self.args.ae_model == "iTransVAE":
+                        z_real = self.model.encode(batch_x.float().to(self.device))[0]
+                    d_real = self.discriminator(z_real)
 
                     # On fake data
                     with torch.no_grad():
-                        x_fake = self.generator(z)
+                        z_fake = self.generator(noise)
 
-                    x_fake.requires_grad_()
-                    d_fake = self.discriminator(x_fake)
+                    z_fake.requires_grad_()
+                    d_fake = self.discriminator(z_fake)
 
                     # get gradient penalty
-                    gradient_penalty = self.grad_penalty(batch_x.float().to(self.device), x_fake)
-
+                    gradient_penalty = self.grad_penalty(z_real, z_fake)
                     d_loss = d_fake.mean() - d_real.mean() + gradient_penalty
                     d_loss.backward()
 
-                    discriminator_optm.step()
+                    if (i + 1) % accumulate_steps == 0:
+                        discriminator_optim.step()
+                        discriminator_optim.zero_grad()  
+                    # discriminator_optim.step()
                     avg_d_loss += (d_fake.mean() - d_real.mean()).item()
                     break
 
             avg_d_loss /= d_update
+            avg_d_set_loss /= d_update
 
             # train generator
             toggle_grad(self.generator, True)
             toggle_grad(self.discriminator, False)
             self.generator.train()
             self.discriminator.train()
-            generator_optm.zero_grad()
-            z = torch.randn(self.args.gan_batch_size, self.args.noise_dim, 1).to(self.device)
-            fake = self.generator(z)
 
-            g_loss = -self.discriminator(fake).mean()
-            g_loss.backward()
-            generator_optm.step()
+            # gradient accumulation
+            for i in range(accumulate_steps):
+                # generator_optim.zero_grad()
 
-            if (iteration + 1) % 100 == 0:
+                noise = torch.randn_like(initial_noise)
+                fake = self.generator(noise)
+                g_loss = -self.discriminator(fake).mean()
+                (g_loss / accumulate_steps).backward() # TODO: check if this is correct
+                generator_optim.step()
+
+            
+            generator_optim.step()
+            generator_optim.zero_grad()
+
+            if (iteration + 1) % 10 == 0:
                 print(
                     "[Iteration: %d/%d] [Time: %f] [D_loss: %f] [G_loss: %f] [gp: %f]"
                     % (
@@ -164,27 +202,34 @@ class Exp_SAGAN(Exp_Basic):
                 }
                 wandb.log(log_dict)
 
-            if (iteration + 1) % 1000 == 0:
-                gen_data = fake.detach().cpu().numpy()
+            # if (iteration + 1) % 2000 == 0:
+            #     dec_out = self.model.decode(fake)
+            #     gen_data = (
+            #         dec_out[:, -self.args.pred_len :, :]
+            #         .squeeze()
+            #         .detach()
+            #         .cpu()
+            #         .numpy()
+            #     )
 
-                for i in range(min(gen_data.shape[2], 10)):
-                    fig = plt.figure(figsize=(20, 20))
-                    for j in range(16):
-                        fig.add_subplot(4, 4, (j + 1))
-                        plt.plot(gen_data[j, :, i], label="generated", linewidth=1)
-                    plt.legend()
+            #     for i in range(min(gen_data.shape[2], 10)):
+            #         fig = plt.figure(figsize=(20, 20))
+            #         for j in range(16):
+            #             fig.add_subplot(4, 4, (j + 1))
+            #             plt.plot(gen_data[j, :, i], label="generated", linewidth=1)
+            #         plt.legend()
 
-                    if not self.args.no_wandb:
-                        print("logging generated data")
-                        wandb.log(
-                            {f"train/generated_per_step/ch{i}": wandb.Image(plt)},
-                            (iteration + 1),
-                        )
-                    plt.clf()
-                    plt.close(fig)
+            #         if not self.args.no_wandb:
+            #             print("logging generated data")
+            #             wandb.log(
+            #                 {f"train/generated_per_step/ch{i}": wandb.Image(plt)},
+            #                 (iteration + 1),
+            #             )
+            #         plt.clf()
+            #         plt.close(fig)
 
-            if (iteration + 1) % 5000 == 0:
-                print(f"Saved Model: {iteration+1}iter ")
+            if (iteration + 1) % 10000 == 0:
+                print(f"Save {iteration+1}iter WGAN model")
                 torch.save(
                     self.generator.state_dict(),
                     os.path.join(
@@ -213,8 +258,8 @@ class Exp_SAGAN(Exp_Basic):
             #                 d_real = self.discriminator(real_rep) # input representation to discriminator
             #                 dloss_real = -d_real.mean()
             #                 # loss of fake
-            #                 z = torch.randn(self.args.gan_batch_size, self.params["noise_dim"]).to(self.device)
-            #                 fake = self.generator(z)
+            #                 noise = torch.randn(self.args.gan_batch_size, self.params["d_model"]).to(self.device)
+            #                 fake = self.generator(noise)
             #                 d_fake = self.discriminator(fake)
             #                 dloss_fake = d_fake.mean()
             #                 # compute dev score
@@ -228,7 +273,9 @@ class Exp_SAGAN(Exp_Basic):
             # if self.wandb is not None:
             #     self.wandb.log(log_dict)
 
-        print(f"Saved Model: {iteration + 1}iter")
+            # print("Time for training gnerator: ", time.time() - time_iter)
+            # print(time.time() - t1,)
+
         torch.save(
             self.generator.state_dict(),
             os.path.join(
@@ -236,364 +283,389 @@ class Exp_SAGAN(Exp_Basic):
                 f"generator_iter{iteration + 1}.dat",
             ),
         )
+        torch.save(
+            self.discriminator.state_dict(),
+            os.path.join(
+                save_dir,
+                f"disc_iter{iteration + 1}.dat",
+            ),
+        )
+        print(f"Saved {iteration + 1}iter Conditional-WGAN")
 
-    # def save_hiddens_and_generated_as_npy(self, ae_setting, gan_setting):
-    #     """
-    #     Save hidden states
+    def save_hiddens_and_generated_as_npy(self, ae_setting, gan_setting):
+        """
+        Save hidden states
 
-    #     Parameters:
-    #     ----------
-    #     ae_setting : str
-    #     gan_setting : str
+        Parameters:
+        ----------
+        ae_setting : str
+        gan_setting : str
 
-    #     Returns:
-    #     ----------
-    #     None : None
-    #     """
-    #     self.model.load_state_dict(
-    #         torch.load(os.path.join("./checkpoints/", ae_setting, "checkpoint.pth"))
-    #     )
-    #     self.generator.load_state_dict(
-    #         torch.load(
-    #             os.path.join(
-    #                 "./checkpoints/",
-    #                 ae_setting,
-    #                 gan_setting,
-    #                 f"generator_iter{self.args.load_iter}.dat",
-    #             )
-    #         )
-    #     )
+        Returns:
+        ----------
+        None : None
+        """
+        self.model.load_state_dict(
+            torch.load(
+                os.path.join("/workspace/checkpoints/", ae_setting, "checkpoint.pth")
+            )
+        )
+        self.generator.load_state_dict(
+            torch.load(
+                os.path.join(
+                    "/workspace/checkpoints/",
+                    ae_setting,
+                    gan_setting,
+                    f"generator_iter{self.args.load_iter}.dat",
+                )
+            )
+        )
 
-    #     print(f"Loading trained {self.args.load_iter} WGAN model")
-    #     self.model.eval()
-    #     self.generator.eval()
+        print(f"Loading trained {self.args.load_iter} WGAN model")
+        self.model.eval()
+        self.generator.eval()
 
-    #     # generate hidden states and save them
-    #     with torch.no_grad():
-    #         z = torch.randn(
-    #             self.args.gan_batch_size, self.args.enc_in, self.args.noise_dim
-    #         ).to(self.device)
-    #         x_fake = self.generator(z)
-    #         hiddens = x_fake.detach().cpu().numpy()
-    #         dec_fake = self.model.decode(x_fake)
-    #         generated = dec_fake.cpu().numpy()
+        # generate hidden states and save them
+        with torch.no_grad():
+            noise = torch.randn(
+                self.args.gan_batch_size, self.args.enc_in, self.args.d_model
+            ).to(self.device)
+            z_fake = self.generator(noise)
+            hiddens = z_fake.detach().cpu().numpy()
+            dec_fake = self.model.decode(z_fake)
+            generated = dec_fake.cpu().numpy()
 
-    #     save_dir = os.path.join("./checkpoints/", ae_setting, gan_setting, "eval_gan/")
-    #     if not os.path.exists(save_dir):
-    #         os.makedirs(save_dir)
-    #     np.save(
-    #         os.path.join(save_dir, "fake_hiddens.npy"), hiddens
-    #     )  ### FIXME: shape (batch, noise_dim, enc_in)
+        save_dir = os.path.join(
+            "/workspace/checkpoints/", ae_setting, gan_setting, "eval_gan/"
+        )
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        np.save(
+            os.path.join(save_dir, "fake_hiddens.npy"), hiddens
+        )  # FIXME: shape (batch, noise_dim, enc_in)
 
-    #     save_data_dir = os.path.join(
-    #         "./checkpoints/",
-    #         ae_setting,
-    #         gan_setting,
-    #         f"generated_data_iter{self.args.load_iter}",
-    #     )
-    #     if not os.path.exists(save_data_dir):
-    #         os.makedirs(save_data_dir)
-    #     np.save(
-    #         os.path.join(save_data_dir, "sample_data.npy"), generated
-    #     )  # shape (batch, pred_len, N)
+        save_data_dir = os.path.join(
+            "/workspace/checkpoints/",
+            ae_setting,
+            gan_setting,
+            f"generated_data_iter{self.args.load_iter}",
+        )
+        if not os.path.exists(save_data_dir):
+            os.makedirs(save_data_dir)
+        np.save(
+            os.path.join(save_data_dir, "sample_data.npy"), generated
+        )  # shape (batch, pred_len, N)
 
-    # def plot_hidden_tsne(self, ae_setting, gan_setting):
-    #     ori_dir = os.path.join("./checkpoints/", ae_setting, "eval_ae/")
-    #     gen_dir = os.path.join("./checkpoints/", ae_setting, gan_setting, "eval_gan/")
-    #     ori_data = np.load(
-    #         os.path.join(ori_dir, "real_hiddens_train.npy")
-    #     )  # FIXME: vali にも対応させる？
-    #     gen_data = np.load(os.path.join(gen_dir, "fake_hiddens.npy"))
+    def plot_hidden_tsne(self, ae_setting, gan_setting):
+        ori_dir = os.path.join("/workspace/checkpoints/", ae_setting, "eval_ae/")
+        gen_dir = os.path.join(
+            "/workspace/checkpoints/", ae_setting, gan_setting, "eval_gan/"
+        )
+        ori_data = np.load(
+            os.path.join(ori_dir, "real_hiddens_train.npy")
+        )  # FIXME: vali にも対応させる？
+        gen_data = np.load(os.path.join(gen_dir, "fake_hiddens.npy"))
 
-    #     anal_sample_no = min([1000, len(ori_data), len(gen_data)])
-    #     np.random.seed(0)
-    #     idx = np.random.permutation(anal_sample_no)[:anal_sample_no]
-    #     ori_data = ori_data[idx]
-    #     gen_data = gen_data[idx]
-    #     multi_cat_data = np.concatenate([ori_data, gen_data], axis=0)
+        anal_sample_no = min([1000, len(ori_data), len(gen_data)])
+        np.random.seed(0)
+        idx = np.random.permutation(anal_sample_no)[:anal_sample_no]
+        ori_data = ori_data[idx]
+        gen_data = gen_data[idx]
+        multi_cat_data = np.concatenate([ori_data, gen_data], axis=0)
 
-    #     for i in range(min(gen_data.shape[1], 10)):
-    #         cat_data = multi_cat_data[:, i, :]
-    #         tsne = TSNE(
-    #             n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
-    #         )
-    #         tsne_obj = tsne.fit_transform(cat_data)
+        for i in range(min(gen_data.shape[1], 10)):
+            cat_data = multi_cat_data[:, i, :]
+            tsne = TSNE(
+                n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
+            )
+            tsne_obj = tsne.fit_transform(cat_data)
 
-    #         f, ax = plt.subplots(1)
-    #         plt.scatter(
-    #             tsne_obj[: len(ori_data), 0],
-    #             tsne_obj[: len(ori_data), 1],
-    #             alpha=0.2,
-    #             label="Original(train)",  # FIXME: vali にも対応させる？
-    #         )
-    #         plt.scatter(
-    #             tsne_obj[len(ori_data) :, 0],
-    #             tsne_obj[len(ori_data) :, 1],
-    #             alpha=0.2,
-    #             label="Generated",
-    #         )
+            f, ax = plt.subplots(1)
+            plt.scatter(
+                tsne_obj[: len(ori_data), 0],
+                tsne_obj[: len(ori_data), 1],
+                alpha=0.2,
+                label="Original(train)",  # FIXME: vali にも対応させる？
+            )
+            plt.scatter(
+                tsne_obj[len(ori_data) :, 0],
+                tsne_obj[len(ori_data) :, 1],
+                alpha=0.2,
+                label="Generated",
+            )
 
-    #         ax.legend()
-    #         plt.title(f"t-SNE plot of ch{i} hidden states")
-    #         plt.xlabel("x-tsne")
-    #         plt.ylabel("y-tsne")
-    #         plt.savefig(
-    #             os.path.join(gen_dir, f"tsne_hidden_ch{i}_train.png"),
-    #             bbox_inches="tight",
-    #             pad_inches=0,
-    #         )
-    #         plt.clf()
+            ax.legend()
+            plt.title(f"t-SNE plot of ch{i} hidden states")
+            plt.xlabel("x-tsne")
+            plt.ylabel("y-tsne")
+            plt.savefig(
+                os.path.join(gen_dir, f"tsne_hidden_ch{i}_train.png"),
+                bbox_inches="tight",
+                pad_inches=0,
+            )
+            plt.clf()
 
-    #         if not self.args.no_wandb:
-    #             wandb.log({f"eval/t-SNE/hidden/ch{i}": wandb.Image(plt)})
+            if not self.args.no_wandb:
+                wandb.log({f"eval/t-SNE/hidden/ch{i}": wandb.Image(plt)})
 
-    # def plot_dec_tsne(self, ae_setting, gan_setting):
-    #     save_dir = os.path.join(
-    #         "./checkpoints/",
-    #         ae_setting,
-    #         gan_setting,
-    #         f"generated_data_iter{self.args.load_iter}/",
-    #     )
+    def plot_dec_tsne(self, ae_setting, gan_setting):
+        save_dir = os.path.join(
+            "/workspace/checkpoints/",
+            ae_setting,
+            gan_setting,
+            f"generated_data_iter{self.args.load_iter}/",
+        )
 
-    #     ori_data = np.load(os.path.join("./data/preprocessed_datasets", self.args.des, f"sl{self.args.seq_len}", "prepro_train_shuffled.npy")) # TODO: vari に対応させる
-    #     gen_data = np.load(os.path.join(save_dir, "sample_data.npy"))
-    #     print(f"ori_data.shape: {ori_data.shape}")
-    #     print(f"gen_data.shape: {gen_data.shape}")
+        ori_data = np.load(
+            os.path.join(
+                "./data/preprocessed_datasets",
+                self.args.des,
+                f"sl{self.args.seq_len}",
+                "prepro_train_shuffled.npy",
+            )
+        )  # TODO: vari に対応させる
+        gen_data = np.load(os.path.join(save_dir, "sample_data.npy"))
+        print(f"ori_data.shape: {ori_data.shape}")
+        print(f"gen_data.shape: {gen_data.shape}")
 
-    #     anal_sample_no = min([1000, len(ori_data), len(gen_data)])
-    #     print(f"anal_sample_no: {anal_sample_no}")
-    #     np.random.seed(0)
-    #     idx = np.random.permutation(anal_sample_no)[:anal_sample_no]
+        anal_sample_no = min([1000, len(ori_data), len(gen_data)])
+        print(f"anal_sample_no: {anal_sample_no}")
+        np.random.seed(0)
+        idx = np.random.permutation(anal_sample_no)[:anal_sample_no]
 
-    #     ori_data = ori_data[idx]
-    #     gen_data = gen_data[idx]
+        ori_data = ori_data[idx]
+        gen_data = gen_data[idx]
 
-    #     assert len(ori_data[0]) == len(gen_data[0])
+        assert len(ori_data[0]) == len(gen_data[0])
 
-    #     multi_cat_data = np.concatenate([ori_data, gen_data], axis=0)
+        multi_cat_data = np.concatenate([ori_data, gen_data], axis=0)
 
-    #     for i in range(min(gen_data.shape[2], 10)):
-    #         cat_data = multi_cat_data[:, i, :]
-    #         tsne = TSNE(
-    #             n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
-    #         )
-    #         tsne_obj = tsne.fit_transform(cat_data)
+        for i in range(min(gen_data.shape[2], 10)):
+            cat_data = multi_cat_data[:, i, :]
+            tsne = TSNE(
+                n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
+            )
+            tsne_obj = tsne.fit_transform(cat_data)
 
-    #         f, ax = plt.subplots(1)
-    #         plt.scatter(
-    #             tsne_obj[: len(ori_data), 0],
-    #             tsne_obj[: len(ori_data), 1],
-    #             alpha=0.2,
-    #             label=f"Original(train)",
-    #         )
-    #         plt.scatter(
-    #             tsne_obj[len(ori_data) :, 0],
-    #             tsne_obj[len(ori_data) :, 1],
-    #             alpha=0.2,
-    #             label="Generated",
-    #         )
+            f, ax = plt.subplots(1)
+            plt.scatter(
+                tsne_obj[: len(ori_data), 0],
+                tsne_obj[: len(ori_data), 1],
+                alpha=0.2,
+                label=f"Original(train)",
+            )
+            plt.scatter(
+                tsne_obj[len(ori_data) :, 0],
+                tsne_obj[len(ori_data) :, 1],
+                alpha=0.2,
+                label="Generated",
+            )
 
-    #         ax.legend()
-    #         plt.title(f"t-SNE plot of generated {i}ch data")
-    #         plt.xlabel("x-tsne")
-    #         plt.ylabel("y-tsne")
-    #         plt.savefig(
-    #             os.path.join(save_dir, f"tsne_dec_ch{i}_train.png"),
-    #             bbox_inches="tight",
-    #             pad_inches=0,
-    #         )
+            ax.legend()
+            plt.title(f"t-SNE plot of generated {i}ch data")
+            plt.xlabel("x-tsne")
+            plt.ylabel("y-tsne")
+            plt.savefig(
+                os.path.join(save_dir, f"tsne_dec_ch{i}_train.png"),
+                bbox_inches="tight",
+                pad_inches=0,
+            )
 
-    #         if not self.args.no_wandb:
-    #             wandb.log(
-    #                 {f"eval/t-SNE/decoded/ch{i}": wandb.Image(plt)}
-    #             )
-    #         plt.clf()
+            if not self.args.no_wandb:
+                wandb.log({f"eval/t-SNE/decoded/ch{i}": wandb.Image(plt)})
+            plt.clf()
 
-    # def plot_gen_data(self, ae_setting, gan_setting):
-    #     save_dir = os.path.join(
-    #         "./checkpoints/",
-    #         ae_setting,
-    #         gan_setting,
-    #         f"generated_data_iter{self.args.load_iter}",
-    #     )
-    #     gen_data = np.load(os.path.join(save_dir, "sample_data.npy"))
+    def plot_gen_data(self, ae_setting, gan_setting):
+        save_dir = os.path.join(
+            "/workspace/checkpoints/",
+            ae_setting,
+            gan_setting,
+            f"generated_data_iter{self.args.load_iter}",
+        )
+        gen_data = np.load(os.path.join(save_dir, "sample_data.npy"))
 
-    #     for i in range(min(gen_data.shape[2], 10)):
-    #         fig = plt.figure(figsize=(20, 20))
-    #         for j in range(9):
-    #             fig.add_subplot(3, 3, (j + 1))
-    #             plt.plot(gen_data[j, :, i], linewidth=1)  # color='#03af7a'
-    #             plt.xticks(fontsize=10)
-    #             plt.yticks(fontsize=10)
-    #         plt.savefig(
-    #             os.path.join(save_dir, f"list_gendata_ch{i}.png"),
-    #             bbox_inches="tight",
-    #             pad_inches=0,
-    #         )
-    #         if not self.args.no_wandb:
-    #             wandb.log({f"eval/generated/ch{i}": wandb.Image(plt)})
-    #         plt.clf()
-    #         plt.close(fig)
+        for i in range(min(gen_data.shape[2], 10)):
+            fig = plt.figure(figsize=(20, 20))
+            for j in range(9):
+                fig.add_subplot(3, 3, (j + 1))
+                plt.plot(gen_data[j, :, i], linewidth=1)  # color='#03af7a'
+                plt.xticks(fontsize=10)
+                plt.yticks(fontsize=10)
+            plt.savefig(
+                os.path.join(save_dir, f"list_gendata_ch{i}.png"),
+                bbox_inches="tight",
+                pad_inches=0,
+            )
+            if not self.args.no_wandb:
+                wandb.log({f"eval/generated/ch{i}": wandb.Image(plt)})
+            plt.clf()
+            plt.close(fig)
 
-    # def save_synth_data_as_h5(self, ae_setting, gan_setting):
-    #     """
-    #     Synthesize large scale data for data augmentation
-    #     """
+    def save_synth_data_as_h5(self, ae_setting, gan_setting):
+        """
+        Synthesize large scale data for data augmentation
+        """
 
-    #     self.model.load_state_dict(
-    #         torch.load(os.path.join("./checkpoints/", ae_setting, "checkpoint.pth"))
-    #     )
-    #     self.generator.load_state_dict(
-    #         torch.load(
-    #             os.path.join(
-    #                 "./checkpoints/",
-    #                 ae_setting,
-    #                 gan_setting,
-    #                 f"generator_iter{self.args.load_iter}.dat",
-    #             )
-    #         )
-    #     )
-    #     self.model.eval()
-    #     self.generator.eval()
+        self.model.load_state_dict(
+            torch.load(
+                os.path.join("/workspace/checkpoints/", ae_setting, "checkpoint.pth")
+            )
+        )
+        self.generator.load_state_dict(
+            torch.load(
+                os.path.join(
+                    "/workspace/checkpoints/",
+                    ae_setting,
+                    gan_setting,
+                    f"generator_iter{self.args.load_iter}.dat",
+                )
+            )
+        )
+        self.model.eval()
+        self.generator.eval()
 
-    #     def _gen(batch_size):
-    #         with torch.no_grad():
-    #             z = torch.randn(batch_size, self.args.enc_in, self.args.noise_dim).to(
-    #                 self.device
-    #             )
-    #             x_fake = self.generator(z)  # shape(batch_size, 96)
-    #             # x_fake = torch.unsqueeze(x_fake, dim=1)
+        def _gen(batch_size):
+            with torch.no_grad():
+                noise = torch.randn(batch_size, self.args.enc_in, self.args.d_model).to(
+                    self.device
+                )
+                z_fake = self.generator(noise)  # shape(batch_size, 96)
+                # z_fake = torch.unsqueeze(z_fake, dim=1)
 
-    #             # for anylysis
-    #             # x_fake = np.load('/home/user/workspace/not_outlier_oriandgen_hidden_val_jsai.npy')
-    #             # x_fake = np.expand_dims(x_fake, 1)
-    #             # x_fake = x_fake.astype(np.float32)
-    #             # x_fake = torch.from_numpy(x_fake).clone()
-    #             # x_fake = x_fake.to(self.device)
+                # for anylysis
+                # z_fake = np.load('/home/user/workspace/not_outlier_oriandgen_hidden_val_jsai.npy')
+                # z_fake = np.expand_dims(z_fake, 1)
+                # z_fake = z_fake.astype(np.float32)
+                # z_fake = torch.from_numpy(z_fake).clone()
+                # z_fake = z_fake.to(self.device)
 
-    #             dec_out = self.model.decode(x_fake)
-    #             dynamics = dec_out[:, -self.args.pred_len :, :].squeeze().cpu().numpy()
+                dec_out = self.model.decode(z_fake)
+                dynamics = dec_out[:, -self.args.pred_len :, :].squeeze().cpu().numpy()
 
-    #         res = []
+            res = []
 
-    #         for i in range(batch_size):
-    #             # dyn = self.dynamic_processor.inverse_transform(dynamics[i]).values.tolist()
-    #             dyn = dynamics[i].tolist()
-    #             res.append(dyn)
+            for i in range(batch_size):
+                # dyn = self.dynamic_processor.inverse_transform(dynamics[i]).values.tolist()
+                dyn = dynamics[i].tolist()
+                res.append(dyn)
 
-    #             # add hidden_state
-    #             # hidden.append(torch.squeeze(x_fake[i]).tolist())
-    #         return res
+                # add hidden_state
+                # hidden.append(torch.squeeze(z_fake[i]).tolist())
+            return res
 
-    #     save_dir = os.path.join(
-    #         "./checkpoints/",
-    #         ae_setting,
-    #         gan_setting,
-    #         f"generated_data_iter{self.args.load_iter}",
-    #     )
-    #     if not os.path.exists(save_dir):
-    #         os.makedirs(save_dir)
-    #     # f = h5py.File(f'{save_dir}/ettm2_sl432_pl288.h5', 'w')
-    #     f = h5py.File(f"{save_dir}/gen.h5", "w")
+        save_dir = os.path.join(
+            "/workspace/checkpoints/",
+            ae_setting,
+            gan_setting,
+            f"generated_data_iter{self.args.load_iter}",
+        )
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        # f = h5py.File(f'{save_dir}/ettm2_sl432_pl288.h5', 'w')
+        f = h5py.File(f"{save_dir}/gen.h5", "w")
 
-    #     sample_batch_size = 4096
-    #     print("sample size:", self.args.sample_size)
-    #     print("sample batch size: ", sample_batch_size)
-    #     tt = self.args.sample_size // sample_batch_size
-    #     for i in range(tt):
-    #         t1 = time.time()
-    #         data = _gen(sample_batch_size)
-    #         f.create_dataset(f"chunk_{i:05}", data=np.array(data))
-    #         if (i + 1) % 10 == 0:
-    #             print("[Generating -> %d/%d] [time %f]" % (i + 1, tt, time.time() - t1))
-    #     f.close()
+        sample_batch_size = 4096
+        print("sample size:", self.args.sample_size)
+        print("sample batch size: ", sample_batch_size)
+        tt = self.args.sample_size // sample_batch_size
+        for i in range(tt):
+            t1 = time.time()
+            data = _gen(sample_batch_size)
+            f.create_dataset(f"chunk_{i:05}", data=np.array(data))
+            if (i + 1) % 10 == 0:
+                print("[Generating -> %d/%d] [time %f]" % (i + 1, tt, time.time() - t1))
+        f.close()
 
-    # def save_synth_data_as_npy(self, ae_setting, gan_setting):
-    #     """
-    #     Synthesize large scale data for data augmentation
-    #     """
+    def save_synth_data_as_npy(self, ae_setting, gan_setting):
+        """
+        Synthesize large scale data for data augmentation
+        """
 
-    #     self.model.load_state_dict(
-    #         torch.load(os.path.join("./checkpoints/", ae_setting, "checkpoint.pth"))
-    #     )
-    #     self.generator.load_state_dict(
-    #         torch.load(
-    #             os.path.join(
-    #                 "./checkpoints/",
-    #                 ae_setting,
-    #                 gan_setting,
-    #                 f"generator_iter{self.args.load_iter}.dat",
-    #             )
-    #         )
-    #     )
-    #     self.model.eval()
-    #     self.generator.eval()
+        self.model.load_state_dict(
+            torch.load(
+                os.path.join("/workspace/checkpoints/", ae_setting, "checkpoint.pth")
+            )
+        )
+        self.generator.load_state_dict(
+            torch.load(
+                os.path.join(
+                    "/workspace/checkpoints/",
+                    ae_setting,
+                    gan_setting,
+                    f"generator_iter{self.args.load_iter}.dat",
+                )
+            )
+        )
+        self.model.eval()
+        self.generator.eval()
 
-    #     def _gen(batch_size):
-    #         with torch.no_grad():
-    #             z = torch.randn(batch_size, self.args.enc_in, self.args.noise_dim).to(
-    #                 self.device
-    #             )
-    #             x_fake = self.generator(z)
-    #             dec_out = self.model.decode(x_fake)
-    #             dynamics = dec_out[:, -self.args.pred_len :, :].squeeze().cpu().numpy()
-    #         res = []
-    #         for i in range(batch_size):
-    #             #dyn = self.dynamic_processor.inverse_transform(dynamics[i]).values.tolist()
-    #             dyn = dynamics[i].tolist()
-    #             res.append(dyn)
-    #         return res
+        def _gen(batch_size):
+            with torch.no_grad():
+                noise = torch.randn(batch_size, self.args.enc_in, self.args.d_model).to(
+                    self.device
+                )
+                z_fake = self.generator(noise)
+                dec_out = self.model.decode(z_fake)
+                dynamics = dec_out[:, -self.args.pred_len :, :].squeeze().cpu().numpy()
+            res = []
+            for i in range(batch_size):
+                # dyn = self.dynamic_processor.inverse_transform(dynamics[i]).values.tolist()
+                dyn = dynamics[i].tolist()
+                res.append(dyn)
+            return res
 
-    #     data = []
-    #     # tt = n // batch_size
-    #     sample_batch_size = 4096
-    #     print("sample size:", self.args.sample_size)
-    #     print("sample batch size: ", sample_batch_size)
-    #     tt = self.args.sample_size // sample_batch_size
-    #     for i in range(tt):
-    #         data.extend(_gen(sample_batch_size))
-    #     res = self.args.sample_size - tt * sample_batch_size
-    #     if res>0:
-    #         data.extend(_gen(res))
+        data = []
+        # tt = n // batch_size
+        sample_batch_size = 4096
+        print("sample size:", self.args.sample_size)
+        print("sample batch size: ", sample_batch_size)
+        tt = self.args.sample_size // sample_batch_size
+        for i in range(tt):
+            data.extend(_gen(sample_batch_size))
+        res = self.args.sample_size - tt * sample_batch_size
+        if res > 0:
+            data.extend(_gen(res))
 
-    #     save_dir = os.path.join(
-    #         "./checkpoints/",
-    #         ae_setting,
-    #         gan_setting,
-    #         f"generated_data_iter{self.args.load_iter}",
-    #     )
-    #     if not os.path.exists(save_dir):
-    #         os.makedirs(save_dir)
-    #     np.save(os.path.join(save_dir, "gen_large.npy"), np.array(data))
+        save_dir = os.path.join(
+            "/workspace/checkpoints/",
+            ae_setting,
+            gan_setting,
+            f"generated_data_iter{self.args.load_iter}",
+        )
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        np.save(os.path.join(save_dir, "gen.npy"), np.array(data))
 
-    def grad_penalty(self, x_real, x_fake):
-        batch_size = x_real.size(0)
+    def grad_penalty(self, z_real, z_fake):
+        batch_size = z_real.size(0)
         gp_weight = 10
 
-        alpha = torch.rand(batch_size, 1, 1).to(self.device)
-        alpha = alpha.expand_as(x_real)
+        if z_real.dim() == 2:
+            alpha = torch.rand(batch_size, 1, device=self.device)
+        elif z_real.dim() == 3:
+            alpha = torch.rand(batch_size, 1, 1, device=self.device)
+        alpha = alpha.expand_as(z_real)
 
-        interpolated = alpha * x_real + (1 - alpha) * x_fake
-        interpolated = Variable(interpolated, requires_grad=True).to(self.device)
+        interpolated = (alpha * z_real + (1 - alpha) * z_fake).requires_grad_(True)
 
         # Calculate probability of interpolated examples
-        if self.args.use_hidden:
-            prob_interpolated = self.discriminator(interpolated)
-        else:
-            prob_interpolated = self.discriminator(torch.permute(interpolated, (0, 2, 1)))
+        prob_interpolated = self.discriminator(interpolated)
 
-        # Calculate gradients of probabilities with respect to examples
-        gradients = torch_grad(
+        gradients = torch.autograd.grad(
             outputs=prob_interpolated,
             inputs=interpolated,
-            grad_outputs=torch.ones(prob_interpolated.size()).to(self.device),
+            # grad_outputs=torch.ones(prob_interpolated.size(), device=self.device),
+            grad_outputs=torch.ones_like(prob_interpolated, device=self.device),
             create_graph=True,
             retain_graph=True,
         )[0]
+
         gradients = gradients.contiguous().view(batch_size, -1)
 
         eps = 1e-10
-        gradients_norm = torch.sqrt(torch.sum(gradients**2, dim=1, dtype=torch.double) + eps)
+        gradients_norm = torch.sqrt(
+            torch.sum(gradients**2, dim=1, dtype=torch.double) + eps
+        )
 
         gradient_penalty = gp_weight * ((gradients_norm - 1) ** 2).mean()
         # print("gradient_penalty: ", gradient_penalty.item())

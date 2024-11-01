@@ -74,7 +74,9 @@ class Exp_SAGAN(Exp_Basic):
 
     def train_gan(self, ae_setting, gan_setting):
         self.model.load_state_dict(
-            torch.load(os.path.join("./checkpoints/", ae_setting, "checkpoint.pth"))
+            torch.load(
+                os.path.join("/workspace/checkpoints/", ae_setting, "checkpoint.pth")
+            )
         )
         print("Loaded trained AutoEncoder")
         # self.model.load_state_dict(
@@ -83,6 +85,7 @@ class Exp_SAGAN(Exp_Basic):
         # print("++++++ DEBUG ++++++")
 
         _, train_loader = self._get_data(flag="train")
+        dataloader_iter = iter(train_loader)
 
         self.generator.train()
         self.discriminator.train()
@@ -97,8 +100,9 @@ class Exp_SAGAN(Exp_Basic):
         gan_iter = self.args.gan_iter
         d_update = self.args.d_update
 
+        initial_noise = None
+
         for iteration in range(gan_iter):
-            dataloader_iter = iter(train_loader)
             avg_d_loss = 0
             avg_d_set_loss = 0
             t1 = time.time()
@@ -118,12 +122,17 @@ class Exp_SAGAN(Exp_Basic):
                         batch_x, _, _, _ = next(dataloader_iter)
 
                     discriminator_optim.zero_grad()
-                    noise = torch.randn(
-                        self.args.gan_batch_size,
-                        self.args.enc_in,
-                        self.args.d_model,
-                        device=self.device,
-                    )
+
+                    if initial_noise is None:
+                        initial_noise = torch.randn(
+                            self.args.gan_batch_size,
+                            self.args.enc_in,
+                            self.args.d_model,
+                            device=self.device,
+                        )
+                        noise = initial_noise
+                    else:
+                        noise = torch.randn_like(initial_noise)
 
                     if self.args.ae_model == "iTransformer":
                         z_real = self.model.encode(batch_x.float().to(self.device))
@@ -156,12 +165,8 @@ class Exp_SAGAN(Exp_Basic):
             self.generator.train()
             self.discriminator.train()
             generator_optim.zero_grad()
-            noise = torch.randn(
-                self.args.gan_batch_size,
-                self.args.enc_in,
-                self.args.d_model,
-                device=self.device,
-            )
+
+            noise = torch.randn_like(initial_noise)
             fake = self.generator(noise)
             g_loss = -self.discriminator(fake).mean()
             g_loss.backward()
@@ -190,33 +195,33 @@ class Exp_SAGAN(Exp_Basic):
                 }
                 wandb.log(log_dict)
 
-            if (iteration + 1) % 2000 == 0:
-                dec_out = self.model.decode(fake)
-                gen_data = (
-                    dec_out[:, -self.args.pred_len :, :]
-                    .squeeze()
-                    .detach()
-                    .cpu()
-                    .numpy()
-                )
+            # if (iteration + 1) % 2000 == 0:
+            #     dec_out = self.model.decode(fake)
+            #     gen_data = (
+            #         dec_out[:, -self.args.pred_len :, :]
+            #         .squeeze()
+            #         .detach()
+            #         .cpu()
+            #         .numpy()
+            #     )
 
-                for i in range(min(gen_data.shape[2], 10)):
-                    fig = plt.figure(figsize=(20, 20))
-                    for j in range(16):
-                        fig.add_subplot(4, 4, (j + 1))
-                        plt.plot(gen_data[j, :, i], label="generated", linewidth=1)
-                    plt.legend()
+            #     for i in range(min(gen_data.shape[2], 10)):
+            #         fig = plt.figure(figsize=(20, 20))
+            #         for j in range(16):
+            #             fig.add_subplot(4, 4, (j + 1))
+            #             plt.plot(gen_data[j, :, i], label="generated", linewidth=1)
+            #         plt.legend()
 
-                    if not self.args.no_wandb:
-                        print("logging generated data")
-                        wandb.log(
-                            {f"train/generated_per_step/ch{i}": wandb.Image(plt)},
-                            (iteration + 1),
-                        )
-                    plt.clf()
-                    plt.close(fig)
+            #         if not self.args.no_wandb:
+            #             print("logging generated data")
+            #             wandb.log(
+            #                 {f"train/generated_per_step/ch{i}": wandb.Image(plt)},
+            #                 (iteration + 1),
+            #             )
+            #         plt.clf()
+            #         plt.close(fig)
 
-            if (iteration + 1) % 2000 == 0:
+            if (iteration + 1) % 10000 == 0:
                 print(f"Save {iteration+1}iter WGAN model")
                 torch.save(
                     self.generator.state_dict(),
@@ -294,12 +299,14 @@ class Exp_SAGAN(Exp_Basic):
         None : None
         """
         self.model.load_state_dict(
-            torch.load(os.path.join("./checkpoints/", ae_setting, "checkpoint.pth"))
+            torch.load(
+                os.path.join("/workspace/checkpoints/", ae_setting, "checkpoint.pth")
+            )
         )
         self.generator.load_state_dict(
             torch.load(
                 os.path.join(
-                    "./checkpoints/",
+                    "/workspace/checkpoints/",
                     ae_setting,
                     gan_setting,
                     f"generator_iter{self.args.load_iter}.dat",
@@ -321,7 +328,9 @@ class Exp_SAGAN(Exp_Basic):
             dec_fake = self.model.decode(z_fake)
             generated = dec_fake.cpu().numpy()
 
-        save_dir = os.path.join("./checkpoints/", ae_setting, gan_setting, "eval_gan/")
+        save_dir = os.path.join(
+            "/workspace/checkpoints/", ae_setting, gan_setting, "eval_gan/"
+        )
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         np.save(
@@ -329,7 +338,7 @@ class Exp_SAGAN(Exp_Basic):
         )  # FIXME: shape (batch, noise_dim, enc_in)
 
         save_data_dir = os.path.join(
-            "./checkpoints/",
+            "/workspace/checkpoints/",
             ae_setting,
             gan_setting,
             f"generated_data_iter{self.args.load_iter}",
@@ -341,8 +350,10 @@ class Exp_SAGAN(Exp_Basic):
         )  # shape (batch, pred_len, N)
 
     def plot_hidden_tsne(self, ae_setting, gan_setting):
-        ori_dir = os.path.join("./checkpoints/", ae_setting, "eval_ae/")
-        gen_dir = os.path.join("./checkpoints/", ae_setting, gan_setting, "eval_gan/")
+        ori_dir = os.path.join("/workspace/checkpoints/", ae_setting, "eval_ae/")
+        gen_dir = os.path.join(
+            "/workspace/checkpoints/", ae_setting, gan_setting, "eval_gan/"
+        )
         ori_data = np.load(
             os.path.join(ori_dir, "real_hiddens_train.npy")
         )  # FIXME: vali にも対応させる？
@@ -392,7 +403,7 @@ class Exp_SAGAN(Exp_Basic):
 
     def plot_dec_tsne(self, ae_setting, gan_setting):
         save_dir = os.path.join(
-            "./checkpoints/",
+            "/workspace/checkpoints/",
             ae_setting,
             gan_setting,
             f"generated_data_iter{self.args.load_iter}/",
@@ -459,7 +470,7 @@ class Exp_SAGAN(Exp_Basic):
 
     def plot_gen_data(self, ae_setting, gan_setting):
         save_dir = os.path.join(
-            "./checkpoints/",
+            "/workspace/checkpoints/",
             ae_setting,
             gan_setting,
             f"generated_data_iter{self.args.load_iter}",
@@ -489,12 +500,14 @@ class Exp_SAGAN(Exp_Basic):
         """
 
         self.model.load_state_dict(
-            torch.load(os.path.join("./checkpoints/", ae_setting, "checkpoint.pth"))
+            torch.load(
+                os.path.join("/workspace/checkpoints/", ae_setting, "checkpoint.pth")
+            )
         )
         self.generator.load_state_dict(
             torch.load(
                 os.path.join(
-                    "./checkpoints/",
+                    "/workspace/checkpoints/",
                     ae_setting,
                     gan_setting,
                     f"generator_iter{self.args.load_iter}.dat",
@@ -534,7 +547,7 @@ class Exp_SAGAN(Exp_Basic):
             return res
 
         save_dir = os.path.join(
-            "./checkpoints/",
+            "/workspace/checkpoints/",
             ae_setting,
             gan_setting,
             f"generated_data_iter{self.args.load_iter}",
@@ -562,12 +575,14 @@ class Exp_SAGAN(Exp_Basic):
         """
 
         self.model.load_state_dict(
-            torch.load(os.path.join("./checkpoints/", ae_setting, "checkpoint.pth"))
+            torch.load(
+                os.path.join("/workspace/checkpoints/", ae_setting, "checkpoint.pth")
+            )
         )
         self.generator.load_state_dict(
             torch.load(
                 os.path.join(
-                    "./checkpoints/",
+                    "/workspace/checkpoints/",
                     ae_setting,
                     gan_setting,
                     f"generator_iter{self.args.load_iter}.dat",
@@ -605,7 +620,7 @@ class Exp_SAGAN(Exp_Basic):
             data.extend(_gen(res))
 
         save_dir = os.path.join(
-            "./checkpoints/",
+            "/workspace/checkpoints/",
             ae_setting,
             gan_setting,
             f"generated_data_iter{self.args.load_iter}",
@@ -614,12 +629,9 @@ class Exp_SAGAN(Exp_Basic):
             os.makedirs(save_dir)
         np.save(os.path.join(save_dir, "gen.npy"), np.array(data))
 
-    def grad_penalty(self, z_real, z_fake):  # TODO: set はどう扱う？
+    def grad_penalty(self, z_real, z_fake):
         batch_size = z_real.size(0)
         gp_weight = 10
-
-        # x_real_cat = torch.cat([x_real, real_mean, real_log_var], dim=2)
-        # x_fake_cat = torch.cat([z_fake, fake_mean, fake_log_var], dim=2)
 
         if z_real.dim() == 2:
             alpha = torch.rand(batch_size, 1, device=self.device)
@@ -628,34 +640,18 @@ class Exp_SAGAN(Exp_Basic):
         alpha = alpha.expand_as(z_real)
 
         interpolated = (alpha * z_real + (1 - alpha) * z_fake).requires_grad_(True)
-        # make mean and log_var interpolated
-
-        # interpolated = Variable(interpolated, requires_grad=True)
 
         # Calculate probability of interpolated examples
         prob_interpolated = self.discriminator(interpolated)
-        # if x_real.dim() == 2:
-        #     prob_interpolated = self.set_discriminator(interpolated)
-        # if x_real.dim() == 3:
-        #     prob_interpolated = self.discriminator(interpolated)
 
-        # Calculate gradients of probabilities with respect to examples
-        # gradients = torch_grad(
-        #     outputs=prob_interpolated,
-        #     inputs=interpolated,
-        #     grad_outputs=torch.ones(prob_interpolated.size(), device=self.device),
-        #     create_graph=True,
-        #     retain_graph=True,
-        # )[0]
         gradients = torch.autograd.grad(
             outputs=prob_interpolated,
             inputs=interpolated,
-            grad_outputs=torch.ones(prob_interpolated.size(), device=self.device),
+            # grad_outputs=torch.ones(prob_interpolated.size(), device=self.device),
+            grad_outputs=torch.ones_like(prob_interpolated, device=self.device),
             create_graph=True,
             retain_graph=True,
-        )[
-            0
-        ]  # CHANGED:
+        )[0]
 
         gradients = gradients.contiguous().view(batch_size, -1)
 

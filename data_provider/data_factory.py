@@ -1,28 +1,37 @@
-from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom, Dataset_Solar, Dataset_PEMS, \
-    Dataset_Pred
+import pdb
+
 from torch.utils.data import DataLoader
 
+from data_provider.data_loader import (
+    Dataset_Custom,
+    Dataset_ETT_hour,
+    Dataset_ETT_minute,
+    Dataset_PEMS,
+    Dataset_Pred,
+    Dataset_Solar,
+)
+
 data_dict = {
-    'ETTh1': Dataset_ETT_hour,
-    'ETTh2': Dataset_ETT_hour,
-    'ETTm1': Dataset_ETT_minute,
-    'ETTm2': Dataset_ETT_minute,
-    'Solar': Dataset_Solar,
-    'PEMS': Dataset_PEMS,
-    'custom': Dataset_Custom,
+    "ETTh1": Dataset_ETT_hour,
+    "ETTh2": Dataset_ETT_hour,
+    "ETTm1": Dataset_ETT_minute,
+    "ETTm2": Dataset_ETT_minute,
+    "Solar": Dataset_Solar,
+    "PEMS": Dataset_PEMS,
+    "custom": Dataset_Custom,
 }
 
 
 def data_provider(args, flag):
     Data = data_dict[args.data]
-    timeenc = 0 if args.embed != 'timeF' else 1
+    timeenc = 0 if args.embed != "timeF" else 1
 
-    if flag == 'test':
+    if flag == "test":
         shuffle_flag = False
         drop_last = True
         batch_size = 1  # bsz=1 for evaluation
         freq = args.freq
-    elif flag == 'pred':
+    elif flag == "pred":
         shuffle_flag = False
         drop_last = False
         batch_size = 1
@@ -31,7 +40,7 @@ def data_provider(args, flag):
     else:
         shuffle_flag = True
         drop_last = True
-        if args.exp_name == "gan":
+        if args.exp_name == "GAN":
             batch_size = args.gan_batch_size
         else:
             batch_size = args.ae_batch_size  # bsz for train and valid
@@ -54,5 +63,6 @@ def data_provider(args, flag):
         shuffle=shuffle_flag,
         num_workers=args.num_workers,
         pin_memory=args.pin_memory,
-        drop_last=drop_last)
+        drop_last=drop_last,
+    )
     return data_set, data_loader

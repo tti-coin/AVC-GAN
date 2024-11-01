@@ -25,7 +25,9 @@ class Exp_AutoEncoder(Exp_Basic):
         super(Exp_AutoEncoder, self).__init__(args)
 
     def _build_model(self):
-        model = self.model_dict[self.args.ae_model].Model(self.args, self.device).float()
+        model = (
+            self.model_dict[self.args.ae_model].Model(self.args, self.device).float()
+        )
         return model
 
     def _get_data(self, flag):
@@ -37,13 +39,13 @@ class Exp_AutoEncoder(Exp_Basic):
         return model_optim
 
     def _select_criterion(self):
-        criterion = nn.MSELoss() 
+        criterion = nn.MSELoss()
         return criterion
-    
+
     # def loss_function(self, outputs, batch_x, mu, logvar):
     #     recon_loss = F.mse_loss(outputs, batch_x, reduction='sum')
     #     kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        
+
     #     return recon_loss + 5*kl_loss
 
     def vali(self, vali_data, vali_loader, criterion):
@@ -92,7 +94,9 @@ class Exp_AutoEncoder(Exp_Basic):
                             batch_x, batch_x_mark, dec_inp, batch_y_mark
                         )[0]
                     else:
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark) # , mu, logvar
+                        outputs = self.model(
+                            batch_x, batch_x_mark, dec_inp, batch_y_mark
+                        )  # , mu, logvar
                 f_dim = -1 if self.args.features == "MS" else 0
                 outputs = outputs[:, -self.args.pred_len :, f_dim:]
 
@@ -130,9 +134,7 @@ class Exp_AutoEncoder(Exp_Basic):
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
 
-        prepro_dir = (
-            f"./data/preprocessed_datasets/{self.args.des}/sl{self.args.seq_len}"
-        )
+        prepro_dir = f"/workspace/data/preprocessed_datasets/{self.args.des}/sl{self.args.seq_len}"
         if not os.path.exists(os.path.join(prepro_dir)):
             os.makedirs(prepro_dir)
 
@@ -188,11 +190,15 @@ class Exp_AutoEncoder(Exp_Basic):
                                 batch_x, batch_x_mark, dec_inp, batch_y_mark
                             )[0]
                         else:
-                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark) #, mu, logvar
+                            outputs = self.model(
+                                batch_x, batch_x_mark, dec_inp, batch_y_mark
+                            )  # , mu, logvar
 
                         f_dim = -1 if self.args.features == "MS" else 0
                         outputs = outputs[:, -self.args.pred_len :, f_dim:]
-                        loss = self.loss_function(outputs, batch_x, mu, logvar)  # CHANGED
+                        loss = self.loss_function(
+                            outputs, batch_x, mu, logvar
+                        )  # CHANGED
                         train_loss.append(loss.item())
                 else:
                     if self.args.output_attention:
@@ -200,7 +206,9 @@ class Exp_AutoEncoder(Exp_Basic):
                             batch_x, batch_x_mark, dec_inp, batch_y_mark
                         )[0]
                     else:
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark) # , mu, logvar 
+                        outputs = self.model(
+                            batch_x, batch_x_mark, dec_inp, batch_y_mark
+                        )  # , mu, logvar
                     f_dim = -1 if self.args.features == "MS" else 0
                     outputs = outputs[:, -self.args.pred_len :, f_dim:]
                     # loss = self.loss_function(outputs, batch_x, mu, logvar)  # CHANGED
@@ -267,12 +275,14 @@ class Exp_AutoEncoder(Exp_Basic):
         if test:
             print("loading model")
             self.model.load_state_dict(
-                torch.load(os.path.join("./checkpoints/" + setting, "checkpoint.pth"))
+                torch.load(
+                    os.path.join("/workspace/checkpoints/" + setting, "checkpoint.pth")
+                )
             )
 
         preds = []
         trues = []
-        folder_path = "./test_results/" + setting + "/"
+        folder_path = "/workspace//test_results/" + setting + "/"
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 
@@ -364,7 +374,7 @@ class Exp_AutoEncoder(Exp_Basic):
         print("test shape:", preds.shape, trues.shape)
 
         # result save
-        folder_path = "./results/" + setting + "/"
+        folder_path = "/workspace/results/" + setting + "/"
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 
@@ -442,7 +452,7 @@ class Exp_AutoEncoder(Exp_Basic):
     #     preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
 
     #     # result save
-    #     folder_path = "./results/" + setting + "/"
+    #     folder_path = "/workscape/results/" + setting + "/"
     #     if not os.path.exists(folder_path):
     #         os.makedirs(folder_path)
 
@@ -552,13 +562,13 @@ class Exp_AutoEncoder(Exp_Basic):
                     os.makedirs(folder_path)
 
                 flag_name = "train" if flag == 0 else "vali"
-                np.save(folder_path + f"real_hiddens_{flag_name}.npy", real_hiddens)
+                # np.save(folder_path + f"real_hiddens_{flag_name}.npy", real_hiddens)
                 np.save(folder_path + f"recons_{flag_name}.npy", recons)
                 np.save(folder_path + f"trues_{flag_name}.npy", trues)
 
     # plot recnstracted data with tsne and matplotlib
     def plot_recon_as_tsne(self, setting):
-        save_dir = os.path.join("./checkpoints/", setting, "eval_ae/")
+        save_dir = os.path.join("/workspace/checkpoints/", setting, "eval_ae/")
 
         flags = ["train", "vali"]
         for flag in flags:
@@ -613,7 +623,7 @@ class Exp_AutoEncoder(Exp_Basic):
                 #         {f"eval/t-SNE/reconstructed/ch{i}/{flag}": wandb.Image(plt)}
                 #     )
 
-                print(f"Plotting reconstructed {flag} data with matplotlib")
+                # print(f"Plotting reconstructed {flag} data with matplotlib")
                 outputs_dir = os.path.join("checkpoints", setting, "eval_ae/outputs")
                 if not os.path.exists(outputs_dir):
                     os.makedirs(outputs_dir)
@@ -637,8 +647,8 @@ class Exp_AutoEncoder(Exp_Basic):
                     plt.close(fig)
 
     def plot_multi_hidden_as_tsne(self, ae_setting):
-        data_dir = os.path.join("./checkpoints/", ae_setting, "eval_ae/")
-        save_dir = os.path.join("./checkpoints/", ae_setting, "eval_ae/")
+        data_dir = os.path.join("/workspace/checkpoints/", ae_setting, "eval_ae/")
+        save_dir = os.path.join("/workspace/checkpoints/", ae_setting, "eval_ae/")
         real_hiddens = np.load(os.path.join(data_dir, "real_hiddens_train.npy"))
 
         anal_sample_no = min([1000, len(real_hiddens)])
