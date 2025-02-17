@@ -1,0 +1,31 @@
+model_name=iTransformer
+
+CUDA_VISIBLE_DEVICES=0 python run_all.py \
+--root_path /workspace/data/iTransformer_datasets/PEMS/ \
+--data_path PEMS07.npz \
+--ae_model_id PEMS07 \
+--ae_model $model_name \
+--data PEMS \
+--features M \
+--seq_len 48 \
+--pred_len 48 \
+--e_layers 4 \
+--enc_in 883 \
+--dec_in 883 \
+--c_out 883 \
+--des pems07 \
+--d_model 128 \
+--d_ff 512 \
+--learning_rate 0.001 \
+--use_norm 0 \
+--gan_model ConditionalSAGAN \
+--gan_model_id CGAN_auum \
+--self_attn \
+--gan_batch_size 64 \
+--accumulation_steps 16 \
+--gen_lr 0.0001 \
+--disc_lr 0.0001 \
+--d_update 10 \
+--gan_iter 40000 \
+--load_iter 40000 \
+--sample_size 16896

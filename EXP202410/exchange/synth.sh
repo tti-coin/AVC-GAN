@@ -1,0 +1,124 @@
+python /workspace/run_all.py \
+--root_path /workspace/data/iTransformer_datasets/exchange_rate/ \
+--data_path exchange_rate.csv \
+--ae_model_id turning_ae \
+--ae_model iTransformer \
+--d_model 128 \
+--d_ff 512 \
+--n_heads 8 \
+--data custom \
+--features M \
+--seq_len 192 \
+--pred_len 192 \
+--e_layers 2 \
+--enc_in 8 \
+--dec_in 8 \
+--c_out 8 \
+--des exchange_rate \
+--ae_batch_size 32 \
+--learning_rate 0.001 \
+--use_norm 0 \
+--gan_model ConditionalSAGAN \
+--gan_model_id CGAN_v2 \
+--self_attn \
+--gan_batch_size 1024 \
+--gen_lr 0.0001 \
+--disc_lr 0.0001 \
+--d_update 10 \
+--gan_iter 40000 \
+--load_iter 40000 \
+--sample_size 51190
+
+python /workspace/run_all.py \
+--root_path /workspace/data/iTransformer_datasets/exchange_rate/ \
+--data_path exchange_rate.csv \
+--ae_model_id turning_ae \
+--ae_model iTransformer \
+--d_model 128 \
+--d_ff 512 \
+--n_heads 8 \
+--data custom \
+--features M \
+--seq_len 288 \
+--pred_len 288 \
+--e_layers 2 \
+--enc_in 8 \
+--dec_in 8 \
+--c_out 8 \
+--des exchange_rate \
+--ae_batch_size 32 \
+--learning_rate 0.001 \
+--use_norm 0 \
+--gan_model ConditionalSAGAN \
+--gan_model_id CGAN_v2 \
+--self_attn \
+--gan_batch_size 1024 \
+--gen_lr 0.0001 \
+--disc_lr 0.0001 \
+--d_update 10 \
+--gan_iter 40000 \
+--load_iter 40000 \
+--sample_size 50230
+
+python /workspace/run_all.py \
+--root_path /workspace/data/iTransformer_datasets/exchange_rate/ \
+--data_path exchange_rate.csv \
+--ae_model_id turning_ae \
+--ae_model iTransformer \
+--d_model 128 \
+--d_ff 512 \
+--n_heads 8 \
+--data custom \
+--features M \
+--seq_len 432 \
+--pred_len 432 \
+--e_layers 2 \
+--enc_in 8 \
+--dec_in 8 \
+--c_out 8 \
+--des exchange_rate \
+--ae_batch_size 32 \
+--learning_rate 0.001 \
+--use_norm 0 \
+--gan_model ConditionalSAGAN \
+--gan_model_id CGAN_v2 \
+--self_attn \
+--gan_batch_size 1024 \
+--gen_lr 0.0001 \
+--disc_lr 0.0001 \
+--d_update 10 \
+--gan_iter 40000 \
+--load_iter 40000 \
+--sample_size 48790
+
+python /workspace/run_all.py \
+--root_path /workspace/data/iTransformer_datasets/exchange_rate/ \
+--data_path exchange_rate.csv \
+--ae_model_id turning_ae \
+--ae_model iTransformer \
+--d_model 128 \
+--d_ff 512 \
+--n_heads 8 \
+--data custom \
+--features M \
+--seq_len 816 \
+--pred_len 816 \
+--e_layers 2 \
+--enc_in 8 \
+--dec_in 8 \
+--c_out 8 \
+--des exchange_rate \
+--ae_batch_size 32 \
+--learning_rate 0.001 \
+--use_norm 0 \
+--gan_model ConditionalSAGAN \
+--gan_model_id CGAN_v2 \
+--self_attn \
+--gan_batch_size 1024 \
+--gen_lr 0.0001 \
+--disc_lr 0.0001 \
+--d_update 10 \
+--gan_iter 40000 \
+--load_iter 40000 \
+--sample_size 44950
+

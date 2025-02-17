@@ -1,0 +1,127 @@
+CUDA_VISIBLE_DEVICES=0 python /workspace/run_all.py \
+--root_path /workspace/data/sasa_datasets/Air \
+--data_path Beijing \
+--ae_model_id short_ae \
+--ae_model iTransformer \
+--d_model 64 \
+--d_ff 256 \
+--n_heads 8 \
+--data air \
+--features M \
+--seq_len 24 \
+--pred_len 24 \
+--e_layers 1 \
+--enc_in 12 \
+--dec_in 12 \
+--c_out 12 \
+--des Beijing \
+--ae_batch_size 32 \
+--learning_rate 0.001 \
+--use_norm 0 \
+--gan_model ConditionalSAGAN \
+--gan_model_id CGAN_short \
+--self_attn \
+--gan_batch_size 1024 \
+--accumulation_steps 1 \
+--gen_lr 0.0001 \
+--disc_lr 0.0001 \
+--d_update 10 \
+--gan_iter 40000 \
+--load_iter 40000 \
+--sample_size 6282
+
+CUDA_VISIBLE_DEVICES=0 python /workspace/run_all.py \
+--root_path /workspace/data/sasa_datasets/Air \
+--data_path Guangzhou \
+--ae_model_id short_ae \
+--ae_model iTransformer \
+--d_model 64 \
+--d_ff 256 \
+--n_heads 8 \
+--data air \
+--features M \
+--seq_len 24 \
+--pred_len 24 \
+--e_layers 1 \
+--enc_in 12 \
+--dec_in 12 \
+--c_out 12 \
+--des Guangzhou \
+--ae_batch_size 32 \
+--learning_rate 0.001 \
+--use_norm 0 \
+--gan_model ConditionalSAGAN \
+--gan_model_id CGAN_short \
+--self_attn \
+--gan_batch_size 1024 \
+--accumulation_steps 1 \
+--gen_lr 0.0001 \
+--disc_lr 0.0001 \
+--d_update 10 \
+--gan_iter 40000 \
+--load_iter 40000 \
+--sample_size 4698
+
+CUDA_VISIBLE_DEVICES=0 python /workspace/run_all.py \
+--root_path /workspace/data/sasa_datasets/Air \
+--data_path Shenzhen \
+--ae_model_id short_ae \
+--ae_model iTransformer \
+--d_model 64 \
+--d_ff 256 \
+--n_heads 8 \
+--data air \
+--features M \
+--seq_len 24 \
+--pred_len 24 \
+--e_layers 1 \
+--enc_in 12 \
+--dec_in 12 \
+--c_out 12 \
+--des Shenzhen \
+--ae_batch_size 32 \
+--learning_rate 0.001 \
+--use_norm 0 \
+--gan_model ConditionalSAGAN \
+--gan_model_id CGAN_short \
+--self_attn \
+--gan_batch_size 1024 \
+--accumulation_steps 1 \
+--gen_lr 0.0001 \
+--disc_lr 0.0001 \
+--d_update 10 \
+--gan_iter 40000 \
+--load_iter 40000 \
+--sample_size 3146
+
+CUDA_VISIBLE_DEVICES=0 python /workspace/run_all.py \
+--root_path /workspace/data/sasa_datasets/Air \
+--data_path Tianjin \
+--ae_model_id short_ae \
+--ae_model iTransformer \
+--d_model 64 \
+--d_ff 256 \
+--n_heads 8 \
+--data air \
+--features M \
+--seq_len 24 \
+--pred_len 24 \
+--e_layers 1 \
+--enc_in 12 \
+--dec_in 12 \
+--c_out 12 \
+--des Tianjin \
+--ae_batch_size 32 \
+--learning_rate 0.001 \
+--use_norm 0 \
+--gan_model ConditionalSAGAN \
+--gan_model_id CGAN_short \
+--self_attn \
+--gan_batch_size 1024 \
+--accumulation_steps 1 \
+--gen_lr 0.0001 \
+--disc_lr 0.0001 \
+--d_update 10 \
+--gan_iter 40000 \
+--load_iter 40000 \
+--sample_size 6282

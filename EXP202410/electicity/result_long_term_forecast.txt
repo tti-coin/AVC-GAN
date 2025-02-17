@@ -1,0 +1,36 @@
+turning_ae_iTransformer_custom_electricity_ftM_sl192_pl192_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.06872870028018951, mae:0.1800358146429062
+
+DEBUG_ae_iTransformer_custom_electricity_ftM_sl192_pl192_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.0981680378317833, mae:0.2170151323080063
+
+DEBUG_ae_iTransformer_custom_electricity_ftM_sl192_pl192_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.0981680378317833, mae:0.2170151323080063
+
+DEBUG_ae_iTransformer_custom_electricity_ftM_sl192_pl192_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.0981680378317833, mae:0.2170151323080063
+
+DEBUG_ae_iTransformer_custom_electricity_ftM_sl192_pl192_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.06872870028018951, mae:0.1800358146429062
+
+turning_ae_iTransformer_custom_electricity_ftM_sl816_pl816_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.14307212829589844, mae:0.26355063915252686
+
+DEBUG_ae_iTransformer_custom_electricity_ftM_sl192_pl192_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.0687042698264122, mae:0.18001165986061096
+
+turning_ae_iTransformer_custom_electricity_ftM_sl288_pl288_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.08236408233642578, mae:0.19763650000095367
+
+turning_ae_iTransformer_custom_electricity_ftM_sl432_pl432_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.09401698410511017, mae:0.2116491198539734
+
+turning_ae_iTransformer_custom_electricity_ftM_sl288_pl288_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.08234895765781403, mae:0.19762054085731506
+
+turning_ae_iTransformer_custom_electricity_ftM_sl288_pl288_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.08234897255897522, mae:0.19762054085731506
+
+turning_ae_iTransformer_custom_electricity_ftM_sl816_pl816_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.11476291716098785, mae:0.23450417816638947
+

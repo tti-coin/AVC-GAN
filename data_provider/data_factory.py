@@ -9,6 +9,9 @@ from data_provider.data_loader import (
     Dataset_PEMS,
     Dataset_Pred,
     Dataset_Solar,
+    Dataset_Stock_Energy,
+    Dataset_EEG,
+    Dataset_Air,
 )
 
 data_dict = {
@@ -19,6 +22,10 @@ data_dict = {
     "Solar": Dataset_Solar,
     "PEMS": Dataset_PEMS,
     "custom": Dataset_Custom,
+    "stock": Dataset_Stock_Energy,
+    "energy": Dataset_Stock_Energy,
+    "eeg": Dataset_EEG,
+    "air": Dataset_Air,
 }
 
 

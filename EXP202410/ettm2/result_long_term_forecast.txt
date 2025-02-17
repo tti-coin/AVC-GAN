@@ -1,0 +1,54 @@
+debug_ae_iTransformer_ETTm2_ettm2_ftM_sl192_pl192_dm64_nh4_el2_dl1_df128_lr0.001_0  
+mse:0.03543416038155556, mae:0.11185076832771301
+
+debug_ae_iTransformer_ETTh2_etth2_ftM_sl192_pl192_dm64_nh4_el2_dl1_df128_lr0.001_0  
+mse:0.08823344111442566, mae:0.20075790584087372
+
+turning_ae_iTransformer_ETTm2_ettm2_ftM_sl288_pl288_dm128_nh8_el2_dl1_df256_lr0.001_0  
+mse:0.030918173491954803, mae:0.10266044735908508
+
+turning_ae_iTransformer_ETTm2_ettm2_ftM_sl192_pl192_dm128_nh8_el2_dl1_df256_lr0.001_0  
+mse:0.02620568871498108, mae:0.09131599217653275
+
+turning_ae_iTransformer_ETTm2_ettm2_ftM_sl432_pl432_dm128_nh8_el2_dl1_df256_lr0.001_0  
+mse:0.04206392914056778, mae:0.12328334152698517
+
+turning_ae_iTransformer_ETTm2_ettm2_ftM_sl816_pl816_dm128_nh8_el2_dl1_df256_lr0.001_0  
+mse:0.07112933695316315, mae:0.16650496423244476
+
+turning_ae_iTransformer_ETTm2_ettm2_ftM_sl288_pl288_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.03737935051321983, mae:0.11165289580821991
+
+turning_ae_iTransformer_ETTm2_ettm2_ftM_sl432_pl432_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.051747869700193405, mae:0.13713929057121277
+
+turning_ae_iTransformer_ETTm2_ettm2_ftM_sl192_pl192_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.03171926364302635, mae:0.09872869402170181
+
+turning_ae_iTransformer_ETTm2_ettm2_ftM_sl816_pl816_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.0874914824962616, mae:0.18445958197116852
+
+turning_ae_iTransformer_ETTm2_ettm2_ftM_sl816_pl816_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.07337966561317444, mae:0.1778710037469864
+
+turning_ae_iTransformer_ETTm2_ettm2_ftM_sl432_pl432_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.05707944557070732, mae:0.15185603499412537
+
+turning_ae_iTransformer_ETTm2_ettm2_ftM_sl288_pl288_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.049137841910123825, mae:0.1387130469083786
+
+turning_ae_iTransformer_ETTm2_ettm2_ftM_sl192_pl192_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.03946598246693611, mae:0.12447190284729004
+
+ablation_ae_iTransformer_ETTm2_ettm2_ftM_sl432_pl432_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.057057350873947144, mae:0.15181314945220947
+
+ablation_ae_iTransformer_ETTm2_ettm2_ftM_sl432_pl432_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.05705734342336655, mae:0.15181314945220947
+
+ablation_ae_iTransformer_ETTm2_ettm2_ftM_sl816_pl816_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.0740797221660614, mae:0.17857569456100464
+
+ablation_ae_iTransformer_ETTm2_ettm2_ftM_sl816_pl816_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.07337329536676407, mae:0.1778612583875656
+

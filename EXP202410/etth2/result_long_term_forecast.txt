@@ -1,0 +1,87 @@
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl192__pl192_dm64_nh4_el2_dl1_df128_lr0.001_0  
+mse:0.082313671708107, mae:0.19265960156917572
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432__pl432_dm64_nh4_el2_dl1_df128_lr0.001_0  
+mse:0.1164892315864563, mae:0.23455142974853516
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432__pl432_dm64_nh4_el2_dl1_df128_lr0.0001_0  
+mse:0.4312717020511627, mae:0.452759325504303
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432__pl432_dm128_nh4_el2_dl1_df256_lr0.0001_0  
+mse:0.18364813923835754, mae:0.2928471267223358
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432__pl432_dm128_nh4_el2_dl1_df256_lr0.001_0  
+mse:0.08170618861913681, mae:0.19278421998023987
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432_pl432_dm64_nh4_el2_dl1_df128_lr0.001_0  
+mse:0.11666389554738998, mae:0.23474328219890594
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432_pl432_dm64_nh4_el2_dl1_df128_lr0.0001_0  
+mse:0.4312717914581299, mae:0.452759325504303
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432_pl432_dm128_nh4_el2_dl1_df256_lr0.001_0  
+mse:0.08172335475683212, mae:0.19265536963939667
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432_pl432_dm128_nh4_el2_dl1_df256_lr0.0001_0  
+mse:0.18364816904067993, mae:0.2928471267223358
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432_pl432_dm64_nh8_el2_dl1_df128_lr0.001_0  
+mse:0.11949194222688675, mae:0.23766709864139557
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432_pl432_dm64_nh8_el2_dl1_df128_lr0.0001_0  
+mse:0.4317558705806732, mae:0.4545546770095825
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432_pl432_dm128_nh8_el2_dl1_df256_lr0.001_0  
+mse:0.08284266293048859, mae:0.19342903792858124
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432_pl432_dm128_nh8_el2_dl1_df256_lr0.0001_0  
+mse:0.18292279541492462, mae:0.2917257249355316
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl192_pl192_dm128_nh8_el2_dl1_df256_lr0.001_0  
+mse:0.057118404656648636, mae:0.15440399944782257
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl288_pl288_dm128_nh8_el2_dl1_df256_lr0.001_0  
+mse:0.06272070854902267, mae:0.16363933682441711
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl288_pl288_dm128_nh8_el2_dl1_df256_lr0.001_0  
+mse:0.06242946907877922, mae:0.16320669651031494
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl288_pl288_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.06627762317657471, mae:0.1699250489473343
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl288_pl288_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.06627556681632996, mae:0.16995231807231903
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl192_pl192_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.058849941939115524, mae:0.15681900084018707
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl816_pl816_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.17542438209056854, mae:0.284527987241745
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432_pl432_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.08786255866289139, mae:0.19941280782222748
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl192_pl192_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.0588427297770977, mae:0.15680848062038422
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl816_pl816_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.1881413757801056, mae:0.2950248718261719
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432_pl432_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.08864272385835648, mae:0.20011278986930847
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl288_pl288_dm128_nh8_el2_dl1_df512_lr0.001_0  
+mse:0.06617950648069382, mae:0.16976860165596008
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl192_pl192_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.1332409679889679, mae:0.23740285634994507
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl816_pl816_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.24820469319820404, mae:0.340812087059021
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl432_pl432_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.17402011156082153, mae:0.28155311942100525
+
+turning_ae_iTransformer_ETTh2_etth2_ftM_sl288_pl288_dm128_nh8_el2_dl1_df512_lr0.0001_0  
+mse:0.15558595955371857, mae:0.26260310411453247
+

@@ -1,7 +1,7 @@
 import os
 import pdb
 import warnings
-
+from scipy.io import arff
 import numpy as np
 import pandas as pd
 import torch
@@ -11,6 +11,244 @@ from torch.utils.data import DataLoader, Dataset
 from utils.timefeatures import time_features
 
 warnings.filterwarnings("ignore")
+
+class Dataset_Air(Dataset):
+    def __init__(
+        self,
+        root_path,
+        flag="train",
+        size=None,
+        features="S",
+        data_path="ETTh1.csv",
+        target="OT",
+        scale=True,
+        timeenc=0,
+        freq="h",
+    ):
+        # size [seq_len, label_len, pred_len]
+        # info
+        if size == None:
+            self.seq_len = 24 * 4 * 4
+            self.label_len = 24 * 4
+            self.pred_len = 24 * 4
+        else:
+            self.seq_len = size[0]
+            self.label_len = size[1]
+            self.pred_len = size[2]
+        # init
+        assert flag in ["train", "test", "val"]
+        type_map = {"train": 0, "val": 1, "test": 2}
+        self.set_type = type_map[flag]
+
+        self.features = features
+        self.target = target
+        self.scale = scale
+        self.timeenc = timeenc
+        self.freq = freq
+        self.flag = flag
+
+        self.root_path = root_path
+        self.data_path = data_path
+        self.__read_data__()
+
+    def __read_data__(self):
+        # data = np.load(os.path.join(self.root_path, f"sl{self.seq_len}", self.data_path))
+        # print(data.shape)
+        self.scaler = StandardScaler()
+        df_data = pd.read_csv(os.path.join(self.root_path, f"{self.data_path}_train.csv"))
+        # drop the first column
+        df_data = df_data.drop(columns=[df_data.columns[0]])
+
+        # num_train = int(len(df_data) * 0.7)
+        # num_test = int(len(df_data) * 0.2)
+        # num_vali = len(df_data) - num_train - num_test
+        # border1s = [0, num_train - self.seq_len, len(df_data) - num_test - self.seq_len]
+        # border2s = [num_train, num_train + num_vali, len(df_data)]
+        # border1 = border1s[self.set_type]
+        # border2 = border2s[self.set_type]
+        if self.flag == "train":
+            df_data = df_data[: int(len(df_data) * 0.9)]
+        elif self.flag == "val":
+            df_data = df_data[int(len(df_data) * 0.9) :]
+        elif self.flag == "test":
+            df_data = pd.read_csv(os.path.join(self.root_path, f"{self.data_path}_test.csv"))
+            df_data = df_data.drop(columns=[df_data.columns[0]])
+
+        if self.features == "S" or self.features == "MS":
+            raise NotImplementedError
+
+        if self.scale:
+            train_data = df_data[0 : int(len(df_data) * 0.9)]
+            self.scaler.fit(train_data.values)
+            data = self.scaler.transform(df_data.values)
+        else:
+            data = df_data.values
+
+        self.data_x = data
+
+    def __getitem__(self, index):
+        s_begin = index
+        s_end = s_begin + self.seq_len
+        seq_x = self.data_x[s_begin:s_end]
+        seq_x_mark = torch.zeros((seq_x.shape[0], 1))
+
+        return seq_x, seq_x, seq_x_mark, seq_x_mark
+
+    def __len__(self):
+        return len(self.data_x) - self.seq_len + 1
+
+class Dataset_EEG(Dataset):
+    def __init__(
+        self,
+        root_path,
+        flag="train",
+        size=None,
+        features="S",
+        data_path="ETTh1.csv",
+        target="OT",
+        scale=True,
+        timeenc=0,
+        freq="h",
+    ):
+        # size [seq_len, label_len, pred_len]
+        # info
+        if size == None:
+            self.seq_len = 24 * 4 * 4
+            self.label_len = 24 * 4
+            self.pred_len = 24 * 4
+        else:
+            self.seq_len = size[0]
+            self.label_len = size[1]
+            self.pred_len = size[2]
+        # init
+        assert flag in ["train", "test", "val"]
+        type_map = {"train": 0, "val": 1, "test": 2}
+        self.set_type = type_map[flag]
+
+        self.features = features
+        self.target = target
+        self.scale = scale
+        self.timeenc = timeenc
+        self.freq = freq
+        self.flag = flag
+
+        self.root_path = root_path
+        self.data_path = data_path
+        self.__read_data__()
+
+    def __read_data__(self):
+        self.scaler = StandardScaler()
+        data, meta = arff.loadarff(os.path.join(self.root_path, self.data_path))
+        df = pd.DataFrame(data)
+        # drop the last column
+        df_data = df.drop(columns=[df.columns[-1]])
+
+        num_train = int(len(df_data) * 0.7)
+        num_test = int(len(df_data) * 0.2)
+        num_vali = len(df_data) - num_train - num_test
+        border1s = [0, num_train - self.seq_len, len(df_data) - num_test - self.seq_len]
+        border2s = [num_train, num_train + num_vali, len(df_data)]
+        border1 = border1s[self.set_type]
+        border2 = border2s[self.set_type]
+
+        if self.features == "S" or self.features == "MS":
+            raise NotImplementedError
+
+        if self.scale:
+            train_data = df_data[border1s[0] : border2s[0]]
+            self.scaler.fit(train_data.values)
+            data = self.scaler.transform(df_data.values)
+        else:
+            data = df_data.values
+
+        self.data_x = data[border1:border2]
+
+    def __getitem__(self, index):
+        s_begin = index
+        s_end = s_begin + self.seq_len
+        seq_x = self.data_x[s_begin:s_end]
+        seq_x_mark = torch.zeros((seq_x.shape[0], 1))
+
+        return seq_x, seq_x, seq_x_mark, seq_x_mark
+
+    def __len__(self):
+        return len(self.data_x) - self.seq_len + 1
+
+class Dataset_Stock_Energy(Dataset):
+    def __init__(
+        self,
+        root_path,
+        flag="train",
+        size=None,
+        features="S",
+        data_path="ETTh1.csv",
+        target="OT",
+        scale=True,
+        timeenc=0,
+        freq="h",
+    ):
+        # size [seq_len, label_len, pred_len]
+        # info
+        if size == None:
+            self.seq_len = 24 * 4 * 4
+            self.label_len = 24 * 4
+            self.pred_len = 24 * 4
+        else:
+            self.seq_len = size[0]
+            self.label_len = size[1]
+            self.pred_len = size[2]
+        # init
+        assert flag in ["train", "test", "val"]
+        type_map = {"train": 0, "val": 1, "test": 2}
+        self.set_type = type_map[flag]
+
+        self.features = features
+        self.target = target
+        self.scale = scale
+        self.timeenc = timeenc
+        self.freq = freq
+        self.flag = flag
+
+        self.root_path = root_path
+        self.data_path = data_path
+        self.__read_data__()
+
+    def __read_data__(self):
+        # data = np.load(os.path.join(self.root_path, f"sl{self.seq_len}", self.data_path))
+        # print(data.shape)
+        self.scaler = StandardScaler()
+        df_data = pd.read_csv(os.path.join(self.root_path, self.data_path))
+
+        num_train = int(len(df_data) * 0.7)
+        num_test = int(len(df_data) * 0.2)
+        num_vali = len(df_data) - num_train - num_test
+        border1s = [0, num_train - self.seq_len, len(df_data) - num_test - self.seq_len]
+        border2s = [num_train, num_train + num_vali, len(df_data)]
+        border1 = border1s[self.set_type]
+        border2 = border2s[self.set_type]
+
+        if self.features == "S" or self.features == "MS":
+            raise NotImplementedError
+
+        if self.scale:
+            train_data = df_data[border1s[0] : border2s[0]]
+            self.scaler.fit(train_data.values)
+            data = self.scaler.transform(df_data.values)
+        else:
+            data = df_data.values
+
+        self.data_x = data[border1:border2]
+
+    def __getitem__(self, index):
+        s_begin = index
+        s_end = s_begin + self.seq_len
+        seq_x = self.data_x[s_begin:s_end]
+        seq_x_mark = torch.zeros((seq_x.shape[0], 1))
+
+        return seq_x, seq_x, seq_x_mark, seq_x_mark
+
+    def __len__(self):
+        return len(self.data_x) - self.seq_len + 1
 
 
 class Dataset_ETT_hour(Dataset):
@@ -60,6 +298,7 @@ class Dataset_ETT_hour(Dataset):
             12 * 30 * 24 - self.seq_len,
             12 * 30 * 24 + 4 * 30 * 24 - self.seq_len,
         ]
+
         border2s = [
             12 * 30 * 24,
             12 * 30 * 24 + 4 * 30 * 24,
@@ -398,7 +637,7 @@ class Dataset_PEMS(Dataset):
 
         # Modified for use as an Auto Encoder
         seq_x = self.data_x[s_begin:s_end]
-        seq_x_mark = self.data_stamp[s_begin:s_end]
+        seq_x_mark = torch.zeros((seq_x.shape[0], 1))
 
         return seq_x, seq_x, seq_x_mark, seq_x_mark
 

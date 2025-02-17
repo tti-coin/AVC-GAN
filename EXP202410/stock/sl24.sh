@@ -1,0 +1,31 @@
+python /workspace/run_all.py \
+--root_path /workspace/data/timegan_datasets \
+--data_path stock_data.csv \
+--ae_model_id short_ae \
+--ae_model iTransformer \
+--d_model 64 \
+--d_ff 256 \
+--n_heads 8 \
+--data stock \
+--features M \
+--seq_len 24 \
+--pred_len 24 \
+--e_layers 2 \
+--enc_in 6 \
+--dec_in 6 \
+--c_out 6 \
+--des stock \
+--ae_batch_size 32 \
+--learning_rate 0.001 \
+--use_norm 0 \
+--gan_model ConditionalSAGAN \
+--gan_model_id CGAN_short \
+--self_attn \
+--gan_batch_size 1024 \
+--accumulation_steps 1 \
+--gen_lr 0.0001 \
+--disc_lr 0.0001 \
+--d_update 10 \
+--gan_iter 40000 \
+--load_iter 40000 \
+--sample_size 2555

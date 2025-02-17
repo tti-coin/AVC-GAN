@@ -1,0 +1,31 @@
+python /workspace/run_all.py \
+--root_path /workspace/data/iTransformer_datasets/electricity/ \
+--data_path electricity.csv \
+--ae_model_id turning_ae \
+--ae_model iTransformer \
+--d_model 128 \
+--d_ff 512 \
+--n_heads 8 \
+--data custom \
+--features M \
+--seq_len 192 \
+--pred_len 192 \
+--e_layers 2 \
+--enc_in 321 \
+--dec_in 321 \
+--c_out 321 \
+--des electricity \
+--ae_batch_size 32 \
+--learning_rate 0.0001 \
+--use_norm 0 \
+--gan_model ConditionalSAGAN \
+--gan_model_id CGAN_accum \
+--self_attn \
+--gan_batch_size 256 \
+--accumulation_steps 4 \
+--gen_lr 0.0001 \
+--disc_lr 0.0001 \
+--d_update 10 \
+--gan_iter 40000 \
+--load_iter 40000 \
+--sample_size 18220
