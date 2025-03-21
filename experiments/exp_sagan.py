@@ -1,7 +1,3 @@
-"""
-CHANGED: function of grad_penalty, dataloader
-"""
-
 import os
 import pdb
 import time
@@ -21,7 +17,6 @@ from torch.autograd import grad as torch_grad
 from data_provider.data_factory import data_provider
 from experiments.exp_basic import Exp_Basic
 
-# from model.gan import Discriminator, Generator  # SetDiscriminator
 from model.iTransformer import Model
 from utils.metrics import metric
 from utils.tools import EarlyStopping, adjust_learning_rate, visual
@@ -110,7 +105,6 @@ class Exp_SAGAN(Exp_Basic):
 
             # train discriminator
             for j in range(d_update):
-                # for i in range(len(train_loader)):
                 for acc in range(accumulation_steps):
                     try:
                         batch_x, _, _, _ = next(dataloader_iter)
@@ -152,8 +146,7 @@ class Exp_SAGAN(Exp_Basic):
                     avg_d_loss += (d_fake.mean() - d_real.mean()).item()
                 discriminator_optim.step()
                 discriminator_optim.zero_grad()
-                # discriminator_optim.step()
-                # break
+
 
             avg_d_loss /=  d_update
 
@@ -199,15 +192,15 @@ class Exp_SAGAN(Exp_Basic):
                 }
                 wandb.log(log_dict)
 
-            if (iteration + 1) % 10000 == 0:
-                print(f"Save {iteration+1}iter model")
-                torch.save(
-                    self.generator.state_dict(),
-                    os.path.join(
-                        save_dir,
-                        f"generator_iter{iteration+1}.dat",
-                    ),
-                )
+            # if (iteration + 1) % 10000 == 0:
+            #     print(f"Save {iteration+1}iter model")
+            #     torch.save(
+            #         self.generator.state_dict(),
+            #         os.path.join(
+            #             save_dir,
+            #             f"generator_iter{iteration+1}.dat",
+            #         ),
+            #     )
 
         torch.save(
             self.generator.state_dict(),
@@ -225,176 +218,6 @@ class Exp_SAGAN(Exp_Basic):
         )
         print(f"Saved {iteration + 1}iter Conditional-WGAN")
 
-    # def save_hiddens_and_generated_as_npy(self, ae_setting, gan_setting):
-    #     self.model.load_state_dict(
-    #         torch.load(
-    #             os.path.join("/workspace/checkpoints/", ae_setting, "checkpoint.pth")
-    #         )
-    #     )
-    #     self.generator.load_state_dict(
-    #         torch.load(
-    #             os.path.join(
-    #                 "/workspace/checkpoints/",
-    #                 ae_setting,
-    #                 gan_setting,
-    #                 f"generator_iter{self.args.load_iter}.dat",
-    #             )
-    #         )
-    #     )
-
-    #     print(f"Loading trained {self.args.load_iter} WGAN model")
-    #     self.model.eval()
-    #     self.generator.eval()
-
-    #     # generate hidden states and save them
-    #     with torch.no_grad():
-    #         noise = torch.randn(
-    #             self.args.gan_batch_size, self.args.enc_in, self.args.d_model
-    #         ).to(self.device)
-    #         z_fake = self.generator(noise)
-    #         hiddens = z_fake.detach().cpu().numpy()
-    #         dec_fake = self.model.decode(z_fake)
-    #         generated = dec_fake.cpu().numpy()
-
-    #     save_dir = os.path.join(
-    #         "/workspace/checkpoints/", ae_setting, gan_setting, "eval_gan/"
-    #     )
-    #     if not os.path.exists(save_dir):
-    #         os.makedirs(save_dir)
-    #     np.save(
-    #         os.path.join(save_dir, "fake_hiddens.npy"), hiddens
-    #     )
-
-    #     save_data_dir = os.path.join(
-    #         "/workspace/checkpoints/",
-    #         ae_setting,
-    #         gan_setting,
-    #         f"generated_data_iter{self.args.load_iter}",
-    #     )
-    #     if not os.path.exists(save_data_dir):
-    #         os.makedirs(save_data_dir)
-    #     np.save(
-    #         os.path.join(save_data_dir, "sample_data.npy"), generated
-    #     )  # shape (batch, pred_len, N)
-
-    # def plot_hidden_tsne(self, ae_setting, gan_setting):
-    #     ori_dir = os.path.join("/workspace/checkpoints/", ae_setting, "eval_ae/")
-    #     gen_dir = os.path.join(
-    #         "/workspace/checkpoints/", ae_setting, gan_setting, "eval_gan/"
-    #     )
-    #     ori_data = np.load(
-    #         os.path.join(ori_dir, "real_hiddens_train.npy")
-    #     )  # FIXME: vali にも対応させる？
-    #     gen_data = np.load(os.path.join(gen_dir, "fake_hiddens.npy"))
-
-    #     anal_sample_no = min([1000, len(ori_data), len(gen_data)])
-    #     np.random.seed(0)
-    #     idx = np.random.permutation(anal_sample_no)[:anal_sample_no]
-    #     ori_data = ori_data[idx]
-    #     gen_data = gen_data[idx]
-    #     multi_cat_data = np.concatenate([ori_data, gen_data], axis=0)
-
-    #     for i in range(min(gen_data.shape[1], 10)):
-    #         cat_data = multi_cat_data[:, i, :]
-    #         tsne = TSNE(
-    #             n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
-    #         )
-    #         tsne_obj = tsne.fit_transform(cat_data)
-
-    #         f, ax = plt.subplots(1)
-    #         plt.scatter(
-    #             tsne_obj[: len(ori_data), 0],
-    #             tsne_obj[: len(ori_data), 1],
-    #             alpha=0.2,
-    #             label="Original(train)",  # FIXME: vali にも対応させる？
-    #         )
-    #         plt.scatter(
-    #             tsne_obj[len(ori_data) :, 0],
-    #             tsne_obj[len(ori_data) :, 1],
-    #             alpha=0.2,
-    #             label="Generated",
-    #         )
-
-    #         ax.legend()
-    #         plt.title(f"t-SNE plot of ch{i} hidden states")
-    #         plt.xlabel("x-tsne")
-    #         plt.ylabel("y-tsne")
-    #         plt.savefig(
-    #             os.path.join(gen_dir, f"tsne_hidden_ch{i}_train.png"),
-    #             bbox_inches="tight",
-    #             pad_inches=0,
-    #         )
-    #         plt.clf()
-
-    #         if not self.args.no_wandb:
-    #             wandb.log({f"eval/t-SNE/hidden/ch{i}": wandb.Image(plt)})
-
-    def plot_dec_tsne(self, ae_setting, gan_setting):
-        save_dir = os.path.join(
-            "/workspace/checkpoints/",
-            ae_setting,
-            gan_setting,
-            f"generated_data_iter{self.args.load_iter}/",
-        )
-
-        ori_data = np.load(
-            os.path.join(
-                "./data/preprocessed_datasets",
-                self.args.des,
-                f"sl{self.args.seq_len}",
-                "prepro_train_shuffled.npy",
-            )
-        )  # TODO: vari に対応させる
-        gen_data = np.load(os.path.join(save_dir, "sample_data.npy"))
-        print(f"ori_data.shape: {ori_data.shape}")
-        print(f"gen_data.shape: {gen_data.shape}")
-
-        anal_sample_no = min([1000, len(ori_data), len(gen_data)])
-        print(f"anal_sample_no: {anal_sample_no}")
-        np.random.seed(0)
-        idx = np.random.permutation(anal_sample_no)[:anal_sample_no]
-
-        ori_data = ori_data[idx]
-        gen_data = gen_data[idx]
-
-        assert len(ori_data[0]) == len(gen_data[0])
-
-        multi_cat_data = np.concatenate([ori_data, gen_data], axis=0)
-
-        for i in range(min(gen_data.shape[2], 10)):
-            cat_data = multi_cat_data[:, i, :]
-            tsne = TSNE(
-                n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
-            )
-            tsne_obj = tsne.fit_transform(cat_data)
-
-            f, ax = plt.subplots(1)
-            plt.scatter(
-                tsne_obj[: len(ori_data), 0],
-                tsne_obj[: len(ori_data), 1],
-                alpha=0.2,
-                label=f"Original(train)",
-            )
-            plt.scatter(
-                tsne_obj[len(ori_data) :, 0],
-                tsne_obj[len(ori_data) :, 1],
-                alpha=0.2,
-                label="Generated",
-            )
-
-            ax.legend()
-            plt.title(f"t-SNE plot of generated {i}ch data")
-            plt.xlabel("x-tsne")
-            plt.ylabel("y-tsne")
-            plt.savefig(
-                os.path.join(save_dir, f"tsne_dec_ch{i}_train.png"),
-                bbox_inches="tight",
-                pad_inches=0,
-            )
-
-            if not self.args.no_wandb:
-                wandb.log({f"eval/t-SNE/decoded/ch{i}": wandb.Image(plt)})
-            plt.clf()
 
     def plot_gen_data(self, ae_setting, gan_setting):
         save_dir = os.path.join(
@@ -421,81 +244,6 @@ class Exp_SAGAN(Exp_Basic):
                 wandb.log({f"eval/generated/ch{i}": wandb.Image(plt)})
             plt.clf()
             plt.close(fig)
-
-    def save_synth_data_as_h5(self, ae_setting, gan_setting):
-        """
-        Synthesize large scale data for data augmentation
-        """
-
-        self.model.load_state_dict(
-            torch.load(
-                os.path.join("/workspace/checkpoints/", ae_setting, "checkpoint.pth")
-            )
-        )
-        self.generator.load_state_dict(
-            torch.load(
-                os.path.join(
-                    "/workspace/checkpoints/",
-                    ae_setting,
-                    gan_setting,
-                    f"generator_iter{self.args.load_iter}.dat",
-                )
-            )
-        )
-        self.model.eval()
-        self.generator.eval()
-
-        def _gen(batch_size):
-            with torch.no_grad():
-                noise = torch.randn(batch_size, self.args.enc_in, self.args.d_model).to(
-                    self.device
-                )
-                z_fake = self.generator(noise)  # shape(batch_size, 96)
-                # z_fake = torch.unsqueeze(z_fake, dim=1)
-
-                # for anylysis
-                # z_fake = np.load('/home/user/workspace/not_outlier_oriandgen_hidden_val_jsai.npy')
-                # z_fake = np.expand_dims(z_fake, 1)
-                # z_fake = z_fake.astype(np.float32)
-                # z_fake = torch.from_numpy(z_fake).clone()
-                # z_fake = z_fake.to(self.device)
-
-                dec_out = self.model.decode(z_fake)
-                dynamics = dec_out[:, -self.args.pred_len :, :].squeeze().cpu().numpy()
-
-            res = []
-
-            for i in range(batch_size):
-                # dyn = self.dynamic_processor.inverse_transform(dynamics[i]).values.tolist()
-                dyn = dynamics[i].tolist()
-                res.append(dyn)
-
-                # add hidden_state
-                # hidden.append(torch.squeeze(z_fake[i]).tolist())
-            return res
-
-        save_dir = os.path.join(
-            "/workspace/checkpoints/",
-            ae_setting,
-            gan_setting,
-            f"generated_data_iter{self.args.load_iter}",
-        )
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        # f = h5py.File(f'{save_dir}/ettm2_sl432_pl288.h5', 'w')
-        f = h5py.File(f"{save_dir}/gen.h5", "w")
-
-        sample_batch_size = 4096
-        print("sample size:", self.args.sample_size)
-        print("sample batch size: ", sample_batch_size)
-        tt = self.args.sample_size // sample_batch_size
-        for i in range(tt):
-            t1 = time.time()
-            data = _gen(sample_batch_size)
-            f.create_dataset(f"chunk_{i:05}", data=np.array(data))
-            if (i + 1) % 10 == 0:
-                print("[Generating -> %d/%d] [time %f]" % (i + 1, tt, time.time() - t1))
-        f.close()
 
     def save_synth_data_as_npy(self, ae_setting, gan_setting):
         """
@@ -557,29 +305,6 @@ class Exp_SAGAN(Exp_Basic):
             os.makedirs(save_dir)
         np.save(os.path.join(save_dir, "gen.npy"), np.array(data))
 
-        # for j in range(1):
-        #     data = []
-        #     sample_batch_size = 4096
-        #     print("sample size:", self.args.sample_size)
-        #     print("sample batch size: ", sample_batch_size)
-        #     tt = self.args.sample_size // sample_batch_size
-        #     for i in range(tt):
-        #         print(f"Generating {i+1}/{tt}")
-        #         data.extend(_gen(sample_batch_size))
-        #     res = self.args.sample_size - tt * sample_batch_size
-        #     if res > 0:
-        #         data.extend(_gen(res))
-
-        # save_dir = os.path.join(
-        #     "/workspace/data/generated_datasets/itransgan_20241023/",
-        #     self.args.des,
-        #     f"sl{self.args.pred_len}")
-        # # pdb.set_trace()
-        # # if not os.path.exists(save_dir):
-        # #     os.makedirs(save_dir)
-        # np.save(os.path.join(save_dir, f"gen_{j:02}.npy"), np.array(data))
-        # print(f"Saved {j}th generated data")
-
     def grad_penalty(self, z_real, z_fake):
         batch_size = z_real.size(0)
         gp_weight = 10
@@ -612,7 +337,6 @@ class Exp_SAGAN(Exp_Basic):
         )
 
         gradient_penalty = gp_weight * ((gradients_norm - 1) ** 2).mean()
-        # print("gradient_penalty: ", gradient_penalty.item())
         return gradient_penalty
 
 

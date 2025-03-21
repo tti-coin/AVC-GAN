@@ -71,7 +71,6 @@ class Model(nn.Module):
                 torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5
             )
             x_enc /= stdev
-        # NOTE: means.shape -> 32, 1, 7
         _, _, N = x_enc.shape
         # B: batch_size;    E: d_model;
         # L: seq_len;       S: pred_len;
@@ -102,7 +101,7 @@ class Model(nn.Module):
 
         return dec_out
 
-    def encode(self, x_enc):  # validation, test で使用？ # TODO:test の正規化
+    def encode(self, x_enc):
         _, _, N = x_enc.shape
 
         # Embedding
@@ -111,9 +110,9 @@ class Model(nn.Module):
         # the dimensions of embedded time series has been inverted, and then processed by native attn, layernorm and ffn modules
         enc_out, attns = self.encoder(emb_out, attn_mask=None)
 
-        return enc_out  # rescaled_hat mean_hat, stdev_hat
+        return enc_out
 
-    def decode(self, enc_out):  # means_hat, stdev_hat  rescaled_hat
+    def decode(self, enc_out):
         _, N, _ = enc_out.shape
         dec_out = self.projector(enc_out).permute(0, 2, 1)[
             :, :, :N

@@ -59,13 +59,6 @@ class Dataset_Air(Dataset):
         # drop the first column
         df_data = df_data.drop(columns=[df_data.columns[0]])
 
-        # num_train = int(len(df_data) * 0.7)
-        # num_test = int(len(df_data) * 0.2)
-        # num_vali = len(df_data) - num_train - num_test
-        # border1s = [0, num_train - self.seq_len, len(df_data) - num_test - self.seq_len]
-        # border2s = [num_train, num_train + num_vali, len(df_data)]
-        # border1 = border1s[self.set_type]
-        # border2 = border2s[self.set_type]
         if self.flag == "train":
             df_data = df_data[: int(len(df_data) * 0.9)]
         elif self.flag == "val":
@@ -340,9 +333,9 @@ class Dataset_ETT_hour(Dataset):
 
     def __getitem__(self, index):
         s_begin = index
-        s_end = s_begin + self.seq_len  # CHANGED
+        s_end = s_begin + self.seq_len
 
-        # Modified for use as an Auto Encoder
+        # for use as an AutoEncoder
         seq_x = self.data_x[s_begin:s_end]
         seq_x_mark = self.data_stamp[s_begin:s_end]
 
@@ -350,7 +343,6 @@ class Dataset_ETT_hour(Dataset):
 
     def __len__(self):
         return len(self.data_x) - self.seq_len + 1
-        # return len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def inverse_transform(self, data):
         return self.scaler.inverse_transform(data)
@@ -446,9 +438,8 @@ class Dataset_ETT_minute(Dataset):
 
     def __getitem__(self, index):
         s_begin = index
-        s_end = s_begin + self.seq_len  # CHANGED
+        s_end = s_begin + self.seq_len 
 
-        # Modified for use as an Auto Encoder
         seq_x = self.data_x[s_begin:s_end]
         seq_x_mark = self.data_stamp[s_begin:s_end]
 
@@ -456,7 +447,6 @@ class Dataset_ETT_minute(Dataset):
 
     def __len__(self):
         return len(self.data_x) - self.seq_len + 1
-        # return len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def inverse_transform(self, data):
         return self.scaler.inverse_transform(data)
@@ -552,9 +542,8 @@ class Dataset_Custom(Dataset):
 
     def __getitem__(self, index):
         s_begin = index
-        s_end = s_begin + self.seq_len  # CHANGED
+        s_end = s_begin + self.seq_len
 
-        # Modified for use as an Auto Encoder
         seq_x = self.data_x[s_begin:s_end]
         seq_x_mark = self.data_stamp[s_begin:s_end]
 
@@ -562,7 +551,6 @@ class Dataset_Custom(Dataset):
 
     def __len__(self):
         return len(self.data_x) - self.seq_len + 1
-        # return len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def inverse_transform(self, data):
         return self.scaler.inverse_transform(data)
@@ -633,9 +621,8 @@ class Dataset_PEMS(Dataset):
 
     def __getitem__(self, index):
         s_begin = index
-        s_end = s_begin + self.seq_len  # CHANGED
+        s_end = s_begin + self.seq_len
 
-        # Modified for use as an Auto Encoder
         seq_x = self.data_x[s_begin:s_end]
         seq_x_mark = torch.zeros((seq_x.shape[0], 1))
 
@@ -643,7 +630,6 @@ class Dataset_PEMS(Dataset):
 
     def __len__(self):
         return len(self.data_x) - self.seq_len + 1
-        # return len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def inverse_transform(self, data):
         return self.scaler.inverse_transform(data)
@@ -717,9 +703,8 @@ class Dataset_Solar(Dataset):
 
     def __getitem__(self, index):
         s_begin = index
-        s_end = s_begin + self.seq_len  # CHANGED
+        s_end = s_begin + self.seq_len
 
-        # Modified for use as an Auto Encoder
         seq_x = self.data_x[s_begin:s_end]
         seq_x_mark = torch.zeros((seq_x.shape[0], 1))
 
@@ -727,7 +712,6 @@ class Dataset_Solar(Dataset):
 
     def __len__(self):
         return len(self.data_x) - self.seq_len + 1
-        # return len(self.data_x) - self.seq_len - self.pred_len + 1
 
     def inverse_transform(self, data):
         return self.scaler.inverse_transform(data)
@@ -836,8 +820,8 @@ class Dataset_Pred(Dataset):
     def __getitem__(self, index):
         s_begin = index
         s_end = s_begin + self.seq_len
-        r_begin = index  # CHANGED
-        r_end = r_begin + self.label_len + self.pred_len  # CHANGED
+        r_begin = index
+        r_end = r_begin + self.label_len + self.pred_len
 
         seq_x = self.data_x[s_begin:s_end]
         if self.inverse:

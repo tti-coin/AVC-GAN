@@ -1,3 +1,5 @@
+# This code is based on https://github.com/thuml/iTransformer
+
 import argparse
 import os
 import pdb
@@ -18,11 +20,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="iTransformer")
 
     # basic experiment setting
-    # parser.add_argument("--training_ae", type=int, default=1, help="status")
     parser.add_argument("--training_gan", type=int, default=0, help="status")
-    # parser.add_argument("--evaluating_gan", type=int, default=0, help="status")
-    # parser.add_argument("--synthesizing", type=int, default=0, help="status")
-
     parser.add_argument(
         "--ae_model_id", type=str, required=True, default="test", help="model id"
     )
@@ -123,10 +121,6 @@ if __name__ == "__main__":
         action="store_true",
         help="whether to reconstruct input data",
     )
-    # parser.add_argument(
-    #     "--do_synthesize", action="store_true", help="whether to use synthetic data"
-    # )
-    # parser.add_argument("--fix_gan", default=None, help="test mode for GAN")
 
     #### GAN setting #### (
     parser.add_argument("--gan_model", type=str, default="SAGAN", help="GAN model name")
@@ -241,7 +235,7 @@ if __name__ == "__main__":
         type=bool,
         default=False,
         help="whether to use efficient_training (exp_name should be partial train)",
-    )  # See Figure 8 of our paper for the detail
+    )
     parser.add_argument(
         "--use_norm", type=int, default=False, help="use norm and denorm"
     )
@@ -255,13 +249,6 @@ if __name__ == "__main__":
 
     # wandb
     parser.add_argument("--no_wandb", action="store_true", help="Disable wandb")
-    # parser.add_argument(
-    #     "--wandb_notes", type=str, default="test", help="desctiption of experiment"
-    # )
-    # parser.add_argument(
-    #     "--wandb_run_name", type=str, default="test", help="wandb run name"
-    # )
-    # parser.add_argument("--wandb_group", type=str, default="test", help="wandb group")
 
     args = parser.parse_args()
     args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
@@ -324,7 +311,6 @@ if __name__ == "__main__":
             print(">>>>>>>ae training : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(ae_setting))
             exp.train(ae_setting)
 
-            # print("Skip AE evaluation")
             print(">>>>>>>ae testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(ae_setting))
             exp.test(ae_setting, test=1)
         
@@ -342,7 +328,7 @@ if __name__ == "__main__":
             if not os.path.exists(os.path.join("/workspace/logs/gan" + gan_setting)):
                 os.makedirs(os.path.join("/workspace/logs/gan" + gan_setting))
             wandb.init(
-                project="iTransGAN-short",
+                project="AVC-GAN",
                 config=args,
                 tags=["GAN"],
                 name=gan_wandb,
@@ -354,13 +340,8 @@ if __name__ == "__main__":
         print(">>>>>>>gan traing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(gan_setting))
         exp.train_gan(ae_setting, gan_setting)
 
-    # args.exp_name = "GAN"
-    # Exp = Exp_SAGAN
 
-    # exp = Exp(args)
-
-    print(">>>>>>>gan synthesizing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(gan_setting))
-    # exp.save_synth_data_as_h5(ae_setting, gan_setting)
-    exp.save_synth_data_as_npy(ae_setting, gan_setting)
+    # print(">>>>>>>gan synthesizing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(gan_setting))
+    # exp.save_synth_data_as_npy(ae_setting, gan_setting)
 
     torch.cuda.empty_cache()

@@ -42,12 +42,6 @@ class Exp_AutoEncoder(Exp_Basic):
         criterion = nn.MSELoss()
         return criterion
 
-    # def loss_function(self, outputs, batch_x, mu, logvar):
-    #     recon_loss = F.mse_loss(outputs, batch_x, reduction='sum')
-    #     kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-
-    #     return recon_loss + 5*kl_loss
-
     def vali(self, vali_data, vali_loader, criterion):
         total_loss = []
         self.model.eval()
@@ -66,7 +60,6 @@ class Exp_AutoEncoder(Exp_Basic):
                     batch_y_mark = batch_y_mark.float().to(self.device)
 
                 # decoder input
-                # CHANGED
                 dec_inp = (
                     torch.zeros(
                         self.args.ae_batch_size,
@@ -96,16 +89,13 @@ class Exp_AutoEncoder(Exp_Basic):
                     else:
                         outputs = self.model(
                             batch_x, batch_x_mark, dec_inp, batch_y_mark
-                        )  # , mu, logvar
+                        )
                 f_dim = -1 if self.args.features == "MS" else 0
                 outputs = outputs[:, -self.args.pred_len :, f_dim:]
 
-                # mu_cpu = mu.detach().cpu()
-                # logvar_cpu = logvar.detach().cpu()
                 pred = outputs.detach().cpu()
                 true = batch_x.detach().cpu()
 
-                # loss = self.loss_function(pred, true, mu_cpu, logvar_cpu)
                 loss = criterion(pred, true)
                 total_loss.append(loss)
 
@@ -129,29 +119,13 @@ class Exp_AutoEncoder(Exp_Basic):
 
         model_optim = self._select_optimizer()
         criterion = self._select_criterion()
-        # criterion = self.loss_function()
 
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
 
-        prepro_dir = f"/workspace/data/preprocessed_datasets/{self.args.des}/sl{self.args.seq_len}"
-        if not os.path.exists(os.path.join(prepro_dir)):
-            os.makedirs(prepro_dir)
-
-            prepro_data = []
-            for j, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
-                train_loader
-            ):
-                prepro_data.append(batch_x.cpu().numpy())
-            prepro_data = np.vstack(prepro_data)
-            np.save(
-                os.path.join(prepro_dir, "prepro_train_shuffled.npy"), prepro_data
-            )  # TODO: vali, test にも拡張する？
-
         for epoch in range(self.args.train_epochs):
             iter_count = 0
             train_loss = []
-            # to_scaled_loss = []
 
             self.model.train()
             epoch_time = time.time()
@@ -171,7 +145,6 @@ class Exp_AutoEncoder(Exp_Basic):
                     batch_y_mark = batch_y_mark.float().to(self.device)
 
                 # decoder input
-                # CHANGED
                 dec_inp = (
                     torch.zeros(
                         self.args.ae_batch_size,
@@ -192,13 +165,11 @@ class Exp_AutoEncoder(Exp_Basic):
                         else:
                             outputs = self.model(
                                 batch_x, batch_x_mark, dec_inp, batch_y_mark
-                            )  # , mu, logvar
+                            )
 
                         f_dim = -1 if self.args.features == "MS" else 0
                         outputs = outputs[:, -self.args.pred_len :, f_dim:]
-                        loss = self.loss_function(
-                            outputs, batch_x, mu, logvar
-                        )  # CHANGED
+                        loss = criterion(outputs, batch_x)
                         train_loss.append(loss.item())
                 else:
                     if self.args.output_attention:
@@ -208,14 +179,11 @@ class Exp_AutoEncoder(Exp_Basic):
                     else:
                         outputs = self.model(
                             batch_x, batch_x_mark, dec_inp, batch_y_mark
-                        )  # , mu, logvar
+                        )
                     f_dim = -1 if self.args.features == "MS" else 0
                     outputs = outputs[:, -self.args.pred_len :, f_dim:]
-                    # loss = self.loss_function(outputs, batch_x, mu, logvar)  # CHANGED
                     loss = criterion(outputs, batch_x)
-                    # loss_to_scaled = criterion(rescaled_hat[:, :, 0], means) + criterion(rescaled_hat[:, :, 1], stdev)
                     train_loss.append(loss.item())
-                    # to_scaled_loss.append(loss_to_scaled.item())
 
                 if (i + 1) % 100 == 0:
                     print(
@@ -241,14 +209,11 @@ class Exp_AutoEncoder(Exp_Basic):
                     scaler.update()
                 else:
                     loss.backward()
-                    # loss_to_scaled.backward()
                     model_optim.step()
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
-            # vali_loss = self.vali(vali_data, vali_loader, self.loss_function)
             vali_loss = self.vali(vali_data, vali_loader, criterion)
-            # test_loss = self.vali(test_data, test_loader, self.loss_function)
             test_loss = self.vali(test_data, test_loader, criterion)
 
             print(
@@ -330,9 +295,6 @@ class Exp_AutoEncoder(Exp_Basic):
                         )[0]
 
                     else:
-                        # outputs = self.model(
-                        #     batch_x, batch_x_mark, dec_inp, batch_y_mark
-                        # ) # TODO
                         enc_out = self.model.encode(batch_x)
                         outputs = self.model.decode(enc_out)
 
@@ -392,295 +354,3 @@ class Exp_AutoEncoder(Exp_Basic):
         np.save(folder_path + "true.npy", trues)
 
         return
-
-    # def predict(self, setting, load=False):
-    #     pred_data, pred_loader = self._get_data(flag="pred")
-
-    #     if load:
-    #         path = os.path.join(self.args.checkpoints, setting)
-    #         best_model_path = path + "/" + "checkpoint.pth"
-    #         self.model.load_state_dict(torch.load(best_model_path))
-
-    #     preds = []
-
-    #     self.model.eval()
-    #     with torch.no_grad():
-    #         for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
-    #             pred_loader
-    #         ):
-    #             batch_x = batch_x.float().to(self.device)
-    #             batch_y = batch_y.float()
-    #             batch_x_mark = batch_x_mark.float().to(self.device)
-    #             batch_y_mark = batch_y_mark.float().to(self.device)
-
-    #             # decoder input
-    #             dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len :, :]).float()
-    #             dec_inp = (
-    #                 torch.cat([batch_y[:, : self.args.label_len, :], dec_inp], dim=1)
-    #                 .float()
-    #                 .to(self.device)
-    #             )
-    #             # encoder - decoder
-    #             if self.args.use_amp:
-    #                 with torch.cuda.amp.autocast():
-    #                     if self.args.output_attention:
-    #                         outputs = self.model(
-    #                             batch_x, batch_x_mark, dec_inp, batch_y_mark
-    #                         )[0]
-    #                     else:
-    #                         outputs = self.model(
-    #                             batch_x, batch_x_mark, dec_inp, batch_y_mark
-    #                         )
-    #             else:
-    #                 if self.args.output_attention:
-    #                     outputs = self.model(
-    #                         batch_x, batch_x_mark, dec_inp, batch_y_mark
-    #                     )[0]
-    #                 else:
-    #                     outputs = self.model(
-    #                         batch_x, batch_x_mark, dec_inp, batch_y_mark
-    #                     )
-    #             outputs = outputs.detach().cpu().numpy()
-    #             if pred_data.scale and self.args.inverse:
-    #                 shape = outputs.shape
-    #                 outputs = pred_data.inverse_transform(outputs.squeeze(0)).reshape(
-    #                     shape
-    #                 )
-    #             preds.append(outputs)
-
-    #     preds = np.array(preds)
-    #     preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
-
-    #     # result save
-    #     folder_path = "/workscape/results/" + setting + "/"
-    #     if not os.path.exists(folder_path):
-    #         os.makedirs(folder_path)
-
-    #     np.save(folder_path + "real_prediction.npy", preds)
-
-    #     return
-
-    def save_recon_as_npy(self, setting, load=False):
-        """
-        generate trues and recons for evaluation
-        """
-        train_data, train_loader = self._get_data(flag="train")
-        vali_data, vali_loader = self._get_data(flag="val")
-        train_vali_data = [train_data, vali_data]
-        train_vali_loader = [train_loader, vali_loader]
-
-        if load:
-            path = os.path.join(self.args.checkpoints, setting)
-            best_model_path = path + "/" + "checkpoint.pth"
-            self.model.load_state_dict(torch.load(best_model_path))
-            print("Loaded trained AE model to reconstruct data.")
-
-        self.model.eval()
-        with torch.no_grad():
-            for flag, loader in enumerate(train_vali_loader):
-                real_hiddens = []
-                recons = []
-                trues = []
-                for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(
-                    loader
-                ):
-                    batch_x = batch_x.float().to(self.device)
-                    batch_y = batch_y.float()
-                    batch_x_mark = batch_x_mark.float().to(self.device)
-                    batch_y_mark = batch_y_mark.float().to(self.device)
-
-                    # decoder input
-                    dec_inp = (
-                        torch.zeros(
-                            self.args.ae_batch_size,
-                            (self.args.seq_len + self.args.label_len),
-                            self.args.enc_in,
-                        )
-                        .float()
-                        .to(self.device)
-                    )
-                    # encoder - decoder
-                    if self.args.use_amp:
-                        with torch.cuda.amp.autocast():
-                            if self.args.output_attention:
-                                enc_out = self.model.encode(batch_x)
-                                outputs = self.model.decode(enc_out)[0]
-                                # outputs = self.model(
-                                #     batch_x, batch_x_mark, dec_inp, batch_y_mark
-                                # )[0]
-                            else:
-                                enc_out = self.model.encode(batch_x)
-                                outputs = self.model.decode(enc_out)
-                    else:
-                        if self.args.output_attention:
-                            enc_out = self.model.encode(batch_x)
-                            outputs = self.model.decode(enc_out)[0]
-                            # outputs = self.model(
-                            #     batch_x, batch_x_mark, dec_inp, batch_y_mark
-                            # )[0]
-                        else:  # CHANGED
-                            enc_out = self.model.encode(batch_x)
-                            outputs = self.model.decode(enc_out)
-                            # outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark) # , mu, logvar
-                    enc_out = enc_out.detach().cpu().numpy()
-                    outputs = outputs.detach().cpu().numpy()
-                    batch_x = batch_x.detach().cpu().numpy()
-                    if (train_data.scale or vali_data.scale) and self.args.inverse:
-                        shape = outputs.shape
-
-                        outputs = (
-                            train_vali_data[flag]
-                            .inverse_transform(outputs.squeeze(0))
-                            .reshape(shape)
-                        )
-                        batch_x = (
-                            train_vali_data[flag]
-                            .inverse_transform(batch_x.squeeze(0))
-                            .reshape(shape)
-                        )
-                    real_hidden = enc_out
-                    recon = outputs
-                    true = batch_x
-
-                    real_hiddens.append(real_hidden)
-                    recons.append(recon)
-                    trues.append(true)
-
-                real_hiddens = np.array(real_hiddens)  # TODO
-                recons = np.array(recons)
-                trues = np.array(trues)
-
-                real_hiddens = real_hiddens.reshape(
-                    -1, real_hiddens.shape[-2], real_hiddens.shape[-1]
-                )
-                recons = recons.reshape(-1, recons.shape[-2], recons.shape[-1])
-                trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
-
-                # result save
-                folder_path = os.path.join(self.args.checkpoints, setting, "eval_ae/")
-                if not os.path.exists(folder_path):
-                    os.makedirs(folder_path)
-
-                flag_name = "train" if flag == 0 else "vali"
-                # np.save(folder_path + f"real_hiddens_{flag_name}.npy", real_hiddens)
-                np.save(folder_path + f"recons_{flag_name}.npy", recons)
-                np.save(folder_path + f"trues_{flag_name}.npy", trues)
-
-    # plot recnstracted data with tsne and matplotlib
-    def plot_recon_as_tsne(self, setting):
-        save_dir = os.path.join("/workspace/checkpoints/", setting, "eval_ae/")
-
-        flags = ["train", "vali"]
-        for flag in flags:
-            ori_data = np.load(os.path.join(save_dir, f"trues_{flag}.npy"))
-            recon_data = np.load(os.path.join(save_dir, f"recons_{flag}.npy"))
-
-            # codebase: TimeGAN
-            anal_sample_no = min([1000, len(ori_data), len(recon_data)])
-            np.random.seed(0)
-            ori_idx = np.random.permutation(anal_sample_no)[:anal_sample_no]
-
-            ori_data = ori_data[ori_idx]
-            recon_data = recon_data[ori_idx]
-
-            for i in range(min(recon_data.shape[2], 10)):
-                cat_data = np.concatenate(
-                    [ori_data[:, :, i], recon_data[:, :, i]], axis=0
-                )
-
-                # print(f"Plotting t-SNE of reconstructed {flag} data")
-                # tsne = TSNE(
-                #     n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
-                # )
-                # tsne_obj = tsne.fit_transform(cat_data)
-
-                # f, ax = plt.subplots(1)
-                # plt.scatter(
-                #     tsne_obj[: len(ori_data), 0],
-                #     tsne_obj[: len(ori_data), 1],
-                #     alpha=0.2,
-                #     label=f"Original({flag})",
-                # )
-                # plt.scatter(
-                #     tsne_obj[len(ori_data) :, 0],
-                #     tsne_obj[len(ori_data) :, 1],
-                #     alpha=0.2,
-                #     label="Reconstructed",
-                # )
-
-                # ax.legend()
-                # plt.title(f"t-SNE plot of reconstructed ch{i} data")
-                # plt.xlabel("x-tsne")
-                # plt.ylabel("y-tsne")
-                # plt.savefig(
-                #     os.path.join(save_dir, f"tsne_recon_{flag}_ch{i}.png"),
-                #     bbox_inches="tight",
-                #     pad_inches=0,
-                # )
-
-                # if not self.args.no_wandb:
-                #     wandb.log(
-                #         {f"eval/t-SNE/reconstructed/ch{i}/{flag}": wandb.Image(plt)}
-                #     )
-
-                # print(f"Plotting reconstructed {flag} data with matplotlib")
-                outputs_dir = os.path.join("checkpoints", setting, "eval_ae/outputs")
-                if not os.path.exists(outputs_dir):
-                    os.makedirs(outputs_dir)
-
-                for i in range(min(recon_data.shape[2], 10)):
-                    fig = plt.figure(figsize=(20, 20))
-                    for j in range(9):
-                        fig.add_subplot(3, 3, (j + 1))
-                        plt.plot(ori_data[j, :, i], label="trues", linewidth=1)
-                        plt.plot(recon_data[j, :, i], label="recons", linewidth=1)
-                    plt.legend()
-                    plt.title(f"reconstructed {flag} data")
-                    plt.savefig(
-                        os.path.join(outputs_dir, f"list_data_{flag}_ch{i}.png"),
-                        bbox_inches="tight",
-                        pad_inches=0,
-                    )
-                    # if not self.args.no_wandb:
-                    #     wandb.log({f"eval/reconstruted/ch{i}/{flag}": wandb.Image(plt)})
-                    plt.clf()
-                    plt.close(fig)
-
-    def plot_multi_hidden_as_tsne(self, ae_setting):
-        data_dir = os.path.join("/workspace/checkpoints/", ae_setting, "eval_ae/")
-        save_dir = os.path.join("/workspace/checkpoints/", ae_setting, "eval_ae/")
-        real_hiddens = np.load(os.path.join(data_dir, "real_hiddens_train.npy"))
-
-        anal_sample_no = min([1000, len(real_hiddens)])
-        np.random.seed(0)
-        idx = np.random.permutation(anal_sample_no)[:anal_sample_no]
-        real_hiddens = real_hiddens[idx]
-
-        cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-        f, ax = plt.subplots(1)
-
-        multi_cat_data = real_hiddens.reshape([-1, real_hiddens.shape[2]])
-        tsne = TSNE(
-            n_components=2, random_state=0, verbose=1, perplexity=40, n_iter=300
-        )
-        tsne_obj = tsne.fit_transform(multi_cat_data)
-
-        for i in range(real_hiddens.shape[1]):
-            plt.scatter(
-                tsne_obj[i * anal_sample_no : (i + 1) * anal_sample_no, 0],
-                tsne_obj[i * anal_sample_no : (i + 1) * anal_sample_no, 1],
-                alpha=0.2,
-                label=f"ch{i}",
-                color=cycle[i],
-                s=5,
-            )
-
-            ax.legend()
-        plt.title(f"t-SNE plot of train multi hidden states")
-        plt.xlabel("x-tsne")
-        plt.ylabel("y-tsne")
-        plt.savefig(
-            os.path.join(save_dir, f"tsne_multi_hidden_train.png"),
-            bbox_inches="tight",
-            pad_inches=0,
-        )

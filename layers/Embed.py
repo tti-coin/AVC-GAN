@@ -147,9 +147,6 @@ class DataEmbedding_inverted(nn.Module):
         super(DataEmbedding_inverted, self).__init__()
         self.value_embedding = nn.Linear(seq_len, d_model)
         self.position_embedding = PositionalEmbedding(d_model=d_model)
-        # self.variate_emb = nn.Embedding(c_in, d_model)
-        # nn.init.normal_(self.variate_emb.weight, std=0.02)
-        
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, x, x_mark):

@@ -1,2 +1,0 @@
-python run.py --is_ae_training 0 --is_gan_training 1 --is_synthesizig 0 --root_path ./data/informer/ettm/ --data_path ETTm2.csv --model_id ettm2_lr0001_bsz32 --model iTransformer --d_model 128 --data ETTm2 --features S --seq_len 432 --pred_len 288 --e_layers 2 --ae_batch_size 32 --train_epochs 100 --patience 10 --learning_rate 0.001 --exp_name gan --gan_model_id debug-dic-hidden-gp --gan_batch_size 1024 --gen_lr 0.0001 --disc_lr 0.0001 --noise_dim 128 --d_update 5 --gan_iter 20000 --no_wandb --sample_size 4096
-# TODO: デコード後の表現で識別器を学習

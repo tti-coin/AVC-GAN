@@ -1,0 +1,30 @@
+python /workspace/run_all.py \
+--root_path /workspace/data/iTransformer_datasets/ETT-small/ \
+--data_path ETTh2.csv \
+--ae_model_id ae \
+--ae_model iTransformer \
+--d_model 128 \
+--d_ff 512 \
+--n_heads 8 \
+--data ETTh2 \
+--features M \
+--seq_len 288 \
+--pred_len 288 \
+--e_layers 2 \
+--enc_in 7 \
+--dec_in 7 \
+--c_out 7 \
+--des etth2 \
+--ae_batch_size 32 \
+--learning_rate 0.0001 \
+--use_norm 0 \
+--gan_model ConditionalSAGAN \
+--gan_model_id CGAN_long \
+--self_attn \
+--gan_batch_size 1024 \
+--gen_lr 0.0001 \
+--disc_lr 0.0001 \
+--d_update 10 \
+--gan_iter 40000 \
+--load_iter 40000 \
+--sample_size 8352

@@ -1,19 +1,21 @@
-# iTransGAN
+# AVC-GAN
 
 ## Usage 
 
-1. Install Pytorch and necessary dependencies.
+1. **Install necessary dependencies.**  
 
 ```
 pip install -r requirements.txt
 ```
 
-1. Train and evaluate the AutoEncoder. 
+2. Prepare the datasets.
+We used the following datasets:
+- [iTransformer datasets](https://github.com/thuml/iTransformer)  
+- [SASA datasets](https://github.com/DMIRLAB-Group/SASA)  
 
+Please download the datasets and place them in the data/ directory.
+
+3. Train the AVC-GAN.
 ```
-python run.py --is_ae_training 1 --is_gan_training 0 --is_syntheting 0
+bash ./scripts/etth1/sl192.sh
 ```
-
-2. Train and ebaluate WGAN-GP with trained AE.
-
-3. Generate synthetized data.
